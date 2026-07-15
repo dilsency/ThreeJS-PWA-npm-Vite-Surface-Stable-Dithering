@@ -19,6 +19,6 @@
       "sizes": "512x512"
     }
   ],
-  "scope": "/ThreeJS-PWA-ECS-Fractal-Dithering-With-Vite/",
+  "scope": "/ThreeJS-PWA-npm-Vite-Surface-Stable-Dithering/",
   "start_url": "./index.html"
 }
