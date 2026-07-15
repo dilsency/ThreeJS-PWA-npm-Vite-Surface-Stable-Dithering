@@ -31,10 +31,57 @@ commented out "just in case") both removed dead weight and fixed this. Verify
 with `npm run build && grep -n script dist/index.html` if anything like this
 is ever reintroduced.
 
-GitHub Pages deployment itself (pushing `dist/` and serving it) has not yet
-been separately re-verified after this migration as of this writing — the
-above confirms the local `npm run build`/`preview` path, which is the part
-that actually determines what ships to Pages.
+### GitHub Pages actually broke — and the cause wasn't Three.js or npm at all
+
+GitHub Pages deployment was re-verified after this migration, and it broke on
+the first attempt: the deployed site showed only the page's background color,
+with `Uncaught TypeError: Failed to resolve module specifier "three"` in the
+console. The cause had nothing to do with npm vs. CDN correctness as such —
+it's the thing "On GitHub Pages... also no risk" below quietly assumed away.
+
+**Root cause: this repo's GitHub Pages was configured to deploy straight from
+the `main` branch root** (Settings → Pages → "Deploy from a branch"), i.e. it
+was serving the raw, unbuilt `index.html`/`main.js` — never running
+`npm run build` at all. That's exactly the "non-bundled deployment path"
+discussed below, except it wasn't a deliberately-preserved fallback, it was
+just how Pages happened to be configured. Serving raw source used to *work*
+under the CDN pattern purely by accident: a full `https://cdn.jsdelivr.net/...`
+URL is a valid ES module specifier a browser can fetch directly, with no
+bundler involved. A bare specifier like `"three"` has no such luck — it only
+resolves through Vite's build step — so raw-source serving broke the moment
+the import changed, independent of anything else about the migration.
+
+**The fix had three parts**, and only the first is really "about" npm vs. CDN:
+
+1. **Actually build and deploy `dist/`.** Added
+   `.github/workflows/deploy.yml`: a GitHub Actions workflow that runs
+   `npm ci && npm run build` and deploys `dist/` via `actions/upload-pages-artifact`
+   + `actions/deploy-pages` on every push to `main`. This also requires
+   flipping the repo's Pages source from "Deploy from a branch" to
+   "GitHub Actions" in Settings — a manual, one-time step outside of git.
+2. **`vite.config.js`'s `base` was pointing at a different repo's name**
+   (`/ThreeJS-PWA-ECS-Surface-Stable-Dithering-With-Vite/`, the sibling
+   CDN-based project this one was forked from) instead of this repo's actual
+   name (`/ThreeJS-PWA-npm-Vite-Surface-Stable-Dithering/`). This is a
+   copy-paste leftover from forking, unrelated to the CDN/npm decision itself
+   — but it would have made every asset URL 404 even with the workflow
+   correctly building and deploying `dist/`, since Vite bakes `base` into every
+   emitted asset path at build time.
+3. **`manifest.json`'s PWA `scope` had the same copy-paste bug**, pointing at
+   a *third*, still-different stale name
+   (`/ThreeJS-PWA-ECS-Fractal-Dithering-With-Vite/`). Not what broke rendering,
+   but worth fixing in the same pass since a wrong `scope` can affect PWA
+   install/service-worker control.
+
+**Takeaway for next time:** when forking one of these sibling projects, always
+grep for the old repo's name (`grep -rn "<old-repo-name>"`) rather than
+assuming a single `vite.config.js` edit catches everything — it showed up in
+three unrelated files here (`vite.config.js`, `manifest.json`, plus cosmetic
+references in `index.html`'s canonical link and a `main.js` comment). And more
+specifically to this doc's actual subject: **"GitHub Pages already builds via
+`npm run build`" is an assumption to verify per-repo, not a given** — check
+Settings → Pages' source setting before trusting that `dist/` is really what's
+being served.
 
 ## The existing pattern
 
@@ -129,6 +176,14 @@ project's own source files. GitHub Pages serves whatever ends up in `dist/`,
 completely agnostic to whether a given piece of code originally came from npm
 or a CDN. The build step is what matters, and that step already happens today
 regardless of this decision.
+
+**Caveat, confirmed the hard way — see "GitHub Pages actually broke" above:**
+that last sentence assumes Pages is actually configured to run the build step.
+It wasn't, in this project; Pages was serving the raw `main` branch with no
+build at all, which the CDN's full-URL import had been silently working around
+this whole time. Verify Settings → Pages' source is "GitHub Actions" (with a
+workflow that runs `npm run build`) before trusting this paragraph for any
+given repo.
 
 **The one genuine, concrete risk: quietly breaking the non-bundled deployment
 path.** `index.html`'s comments and the `.vite/vite.config.js` aliases exist
