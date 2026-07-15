@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>PWA ECS - Surface-Stable Dithering With Vite</title>
+<link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
+<link rel="canonical" href="https://dilsency.github.io/threejs/" />
+<link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+<style>
+html,body,canvas#canvas{margin:0;background-color:#606000;}
+html,body{height:100%;}
+canvas#canvas{width:100% !important;height:100% !important;display:block !important;}
+</style>
+<!--
+  Import map kept for non-bundled deployments (e.g. when serving static files
+  directly or deploying to GitHub Pages without a bundler). We also use Vite
+  during development and build; Vite does not use the browser importmap and
+  resolves bare imports itself. To ensure the same bare-specifier imports work
+  in Vite dev, we added equivalent aliases in .vite/vite.config.js.
+
+  Alternative considered:
+  - Replace all bare imports with explicit relative imports (e.g.
+    import {Entity} from "./classes/ECS/entity.js"). That approach eliminates
+    the need for both the importmap and Vite aliases and is the most portable
+    option (works with and without bundlers). We left the importmap in place
+    to preserve compatibility with non-bundled deployments and to keep the
+    current code unchanged for easy testing.
+-->
+
+<!--
+<script type="importmap">
+{
+"imports": {
+"three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/",
+
+"entity_manager": "./classes/ECS/entity_manager.js",
+"entity": "./classes/ECS/entity.js",
+"entity_component": "./classes/ECS/entity_component.js",
+
+"player": "./entity components/player_controller.js",
+"camera": "./entity components/camera_controller_first_person.js"
+}
+}
+</script>
+-->
+<script lang="javascript">
+    if ("serviceWorker" in navigator) {
+          navigator.serviceWorker
+            .register("./sw.js")
+            .then(function (registration) {
+              // Registration was successful
+              console.log(
+                "ServiceWorker registration successful with scope: ",
+                registration.scope
+              );
+            })
+            .catch(function (err) {
+              // registration failed :(
+              console.log("ServiceWorker registration failed: ", err);
+            });
+        }
+
+        window.addEventListener("beforeinstallprompt", function (e) {
+          e.userChoice.then(function (choiceResult) {
+            console.log(choiceResult.outcome);
+            if (choiceResult.outcome == "dismissed") {
+              console.log("User cancelled home screen install");
+            } else {
+              console.log("User added to home screen");
+            }
+          });
+        });
+</script>
+</head>
+<body>
+<script type="module" src="main.js"></script>
+</body>
+</html>
