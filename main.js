@@ -6,7 +6,7 @@
 
 // imports
 // base
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js";// import * as THREE from "three";
+import * as THREE from "three";
 // entity-component-system (ECS)
 import {EntityManager} from "./classes/ECS/entity_manager.js";
 import {Entity} from "./classes/ECS/entity.js";

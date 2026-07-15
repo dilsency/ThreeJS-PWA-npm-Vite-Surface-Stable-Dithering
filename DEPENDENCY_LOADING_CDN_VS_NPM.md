@@ -1,8 +1,40 @@
 # CDN imports vs. npm dependencies — the debate, for future reference
 
-Status: unresolved for PeerJS specifically; this project's existing pattern
-(Three.js) already leans CDN. Read this before adding any new runtime
-dependency (starting with PeerJS — see `LAN_MULTIPLAYER_CONSIDERATIONS.md`).
+Status: unresolved for PeerJS specifically. **Three.js has since been migrated
+off the CDN pattern this doc otherwise describes** — see "Outcome: the Three.js
+migration" below before assuming the rest of this doc reflects current source.
+Read this before adding any new runtime dependency (starting with PeerJS — see
+`LAN_MULTIPLAYER_CONSIDERATIONS.md`).
+
+## Outcome: the Three.js migration (this project only)
+
+This project (the npm/Vite variant, forked from the CDN-based
+`ThreeJS-PWA-ECS-Surface-Stable-Dithering-With-Vite`) actually made the switch
+described hypothetically below: `npm install three` was run, all seven
+`import * as THREE from "https://cdn.jsdelivr.net/..."` lines became
+`import * as THREE from "three";`, and the dead import-map/alias machinery was
+deleted rather than kept as a fallback. `npm run dev`, `npm run build`, and
+`npm run preview` all work unchanged — this confirms the doc's prediction
+below that npm-installing Three.js carries "essentially no new risk" locally
+or in the `vite build` → `dist/` → GitHub Pages path.
+
+One risk the doc below didn't anticipate, found while verifying the build
+output: the commented-out `<script type="importmap">` block that used to sit
+in `index.html` was **not actually inert** under this project's Vite version
+(`vite@8.0.14`, which pulls in an experimental Rolldown-powered build core).
+Its HTML transform mis-parses `<script>` tags nested inside an HTML comment
+and resurrects them as live tags in the built `dist/index.html` — so the
+"dead" CDN import map was silently shipping to production, re-pointing
+`"three"` back at jsdelivr in the built HTML even after the JS source moved to
+bare-specifier npm imports. Deleting that block (rather than leaving it
+commented out "just in case") both removed dead weight and fixed this. Verify
+with `npm run build && grep -n script dist/index.html` if anything like this
+is ever reintroduced.
+
+GitHub Pages deployment itself (pushing `dist/` and serving it) has not yet
+been separately re-verified after this migration as of this writing — the
+above confirms the local `npm run build`/`preview` path, which is the part
+that actually determines what ships to Pages.
 
 ## The existing pattern
 

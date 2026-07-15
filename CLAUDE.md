@@ -12,17 +12,36 @@ There is no test suite and no `lint` script. ESLint (`eslint.config.js`) is giti
 
 ## Architecture
 
-### Three.js is loaded from a CDN, not npm
+### Three.js is an npm dependency (this project is the npm/Vite variant)
 
-`three` is **not** an npm dependency (`node_modules` has no `three` package). Every file that needs it imports directly from jsdelivr:
+This project is a deliberate fork of the sibling project
+`ThreeJS-PWA-ECS-Surface-Stable-Dithering-With-Vite` (CDN-based), created to
+test whether a fully npm-installed dependency tree still works the same way
+locally (`npm run dev`/`build`/`preview`) and once deployed to GitHub Pages.
+`three` is a real `dependencies` entry in `package.json` (`node_modules/three`
+exists); every file that needs it imports the bare specifier:
 
 ```js
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js";
+import * as THREE from "three";
 ```
 
-This is deliberate and repeated verbatim (with a commented-out `// import * as THREE from "three";` alternative) at the top of every module that touches Three.js. When adding a new file that needs THREE, copy this exact import line rather than adding `three` to `package.json`. The bare specifier `"three"` is kept alive only via the commented-out import map in `index.html` and aliases in `.vite/vite.config.js` — an alternate/duplicate Vite config not used by the actual build (the real one is the top-level `vite.config.js`).
+Vite resolves this natively at both dev and build time — no import map, no
+Vite aliases, no CDN URL anywhere in source. The commented-out import map that
+used to live in `index.html` (for a non-bundled/no-build static-serving
+fallback) was deleted: besides being unused dead weight once every dependency
+is npm-installed, it was also found to be **actively broken** — this project's
+Vite version pulls in an experimental Rolldown-powered core whose HTML
+transform mis-parses `<script>` tags sitting inside an HTML comment and
+resurrects them as live tags in the built `dist/index.html`, which
+re-introduced a live jsdelivr `<script type="importmap">` pointing `"three"`
+back at the CDN in production output. If you ever add a commented-out
+`<script>` block back to `index.html` for reference, verify with `npm run
+build && grep -n script dist/index.html` that it actually stayed inert.
 
-Before adding any *new* runtime dependency (npm-installed or CDN), read `DEPENDENCY_LOADING_CDN_VS_NPM.md` — it covers the CDN-vs-npm tradeoff in depth, including the PWA/service-worker/GitHub-Pages reasoning behind this pattern, so that decision doesn't need to be re-litigated from scratch each time.
+Read `DEPENDENCY_LOADING_CDN_VS_NPM.md` before deciding how to load any *new*
+runtime dependency — it covers the CDN-vs-npm tradeoff this project exists to
+test, including the PWA/service-worker/GitHub-Pages reasoning, and now also
+records the outcome of actually making this switch.
 
 ### ECS layer (`classes/ECS/`)
 

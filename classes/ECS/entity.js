@@ -1,6 +1,6 @@
 // imports
 // base
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js";// import * as THREE from "three";
+import * as THREE from "three";
 
 // dynamicInstance.mjs
 //import path from 'path';

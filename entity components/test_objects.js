@@ -1,6 +1,6 @@
 // imports
 // base
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js";// import * as THREE from "three";
+import * as THREE from "three";
 // ECS
 import {EntityComponent} from "../classes/ECS/entity_component.js";
 import { createFractalMaterial, createFractalMaterialFromSources } from "../shaders/Simple_FractalDithering.js";

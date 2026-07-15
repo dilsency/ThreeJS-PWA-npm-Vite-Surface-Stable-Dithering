@@ -1,4 +1,4 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js";// import * as THREE from "three";
+import * as THREE from "three";
 import {EntityComponent} from "../classes/ECS/entity_component.js";
 
 export class EntityComponentCameraControllerFirstPersonInput extends EntityComponent

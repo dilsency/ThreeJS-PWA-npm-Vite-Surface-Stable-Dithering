@@ -3,7 +3,7 @@
 // bundler configuration (raw loader). To avoid MIME/import issues in the browser,
 // this module fetches the shader sources at runtime by default.
 
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js";// import * as THREE from "three";
+import * as THREE from "three";
 
 async function loadText(url) {
   const r = await fetch(url);
