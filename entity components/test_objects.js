@@ -189,6 +189,7 @@ export class EntityComponentTestCubeHUD extends EntityComponentTestCube
 {
     #positionOffsetY = 0;
     #tiltFactor = 0;
+    #yawRadians = 0;
 
     // construct
     constructor(params)
@@ -204,6 +205,10 @@ export class EntityComponentTestCubeHUD extends EntityComponentTestCube
         {
             this.#tiltFactor = params.tiltFactor;
         }
+        if(params.yawRadians != null)
+        {
+            this.#yawRadians = params.yawRadians;
+        }
     }
 
      // lifecycle
@@ -216,6 +221,16 @@ export class EntityComponentTestCubeHUD extends EntityComponentTestCube
         // aims at the camera's single point rather than the frustum ray through this
         // spot), just tilt down proportionally to how far below center it sits.
         this.methodGetCube().rotation.x += this.#positionOffsetY * this.#tiltFactor;
+
+        // Unlike the vertical tilt above, this yaw IS an exact lookAt-derived
+        // correction (computed in main.js via THREE.Object3D.lookAt against
+        // cameraHUD's real position, not a proportional approximation) — it undoes
+        // the perspective skew a horizontally off-center cubeHUD would otherwise show
+        // under cameraHUD's wide FOV. Deliberately makes rotation.y non-zero, i.e. no
+        // longer parallel to cameraHUD's forward axis: that tradeoff (skew-free look
+        // vs. literal parallel-to-camera facing) is intentional — see
+        // HUD_PANEL_CUBE_FITTING.md.
+        this.methodGetCube().rotation.y += this.#yawRadians;
     }
 }
 
