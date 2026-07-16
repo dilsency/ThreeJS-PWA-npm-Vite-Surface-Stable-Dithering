@@ -83,6 +83,72 @@ specifically to this doc's actual subject: **"GitHub Pages already builds via
 Settings → Pages' source setting before trusting that `dist/` is really what's
 being served.
 
+### PWA installability broke too — static assets need to live in `public/`
+
+Once the Pages deploy itself was fixed (previous section), the site rendered
+correctly but the browser's install prompt (the icon in Chrome's address bar)
+didn't appear. Direct checks against the deployed site showed why:
+`manifest.json`'s two icon URLs and `sw.js` all returned real 404s in
+production, even though they built and worked in `npm run preview` too — this
+wasn't a Pages-specific problem, it was the build itself never producing
+these files.
+
+**Root cause: `icons/`, `manifest.json`, and `sw.js` all lived at the project
+root, not inside a `public/` folder.** Vite has exactly one mechanism for
+shipping a file byte-for-byte at a fixed, predictable URL without going
+through JS import/bundling: put it in `public/`, and Vite copies it into
+`dist/` unchanged. Nothing else triggers that — a file only gets copied if
+something (an import, an `<img src>`, a recognized `<link>` tag) references
+it in a way Vite's build actually resolves. `manifest.json` sort of worked by
+accident: Vite's HTML plugin specially recognizes `<link rel="manifest">` and
+copies+hashes *that* file — but doesn't parse the JSON *inside* it, so its own
+`icons` array (relative paths like `./icons/icon_192x192.png`) still pointed
+at files that were never copied anywhere, and after hashing moved
+`manifest.json` itself into `dist/assets/`, those relative paths didn't even
+point at the right *location* anymore. `sw.js` got no special treatment at
+all — it's only ever referenced via a runtime string
+(`navigator.serviceWorker.register("./sw.js")`), which Vite can't statically
+see, so it was silently absent from every build.
+
+**Why this matters specifically for PWA installability, beyond "files
+404":** Chrome's install-eligibility check requires manifest icons to
+actually be fetchable (at minimum a ≥192px icon; ideally a 512px `any`- or
+`maskable`-purpose one too). A manifest that references icons which don't
+load fails validation quietly — no console error, the omnibox install icon
+just never shows up. This is a stricter, more silent failure mode than the
+CDN-vs-npm module-resolution error from the previous section; that one at
+least threw loudly in the console.
+
+**The fix:** move `icons/`, `manifest.json`, and `sw.js` into a new
+`public/` folder (all together, preserving their relative layout to each
+other, so `manifest.json`'s existing `./icons/...` paths keep resolving
+correctly). Then, in `index.html`, switch the `<link rel="manifest">` and
+favicon hrefs from bare relative paths to Vite's `%BASE_URL%` placeholder
+(`href="%BASE_URL%manifest.json"`) — a bare relative href on those tags makes
+Vite try to resolve+hash them as a bundled asset import, which breaks once
+the file only exists in `public/` and not next to `index.html` anymore;
+`%BASE_URL%` expands to the configured `base` and is left untouched by Vite's
+asset pipeline, which is the documented way to reference `public/` contents
+from HTML. The inline service-worker registration (`register("./sw.js")`)
+needed no change — a plain relative path from the page's own URL already
+lands in the right place once `sw.js` is actually being served from the
+site's base path.
+
+**Separately found in the same pass:** `favicon.ico` was referenced in
+`index.html` but never existed anywhere in the repo — an orphaned reference
+from however this project was originally scaffolded, unrelated to the
+CDN/npm migration. Fixed by pointing the favicon at the existing
+`icons/icon_192x192.png` instead of adding a new file.
+
+**Takeaway for next time:** treat "does it build?" and "does it actually ship
+correctly?" as separate questions for anything that isn't a JS/CSS import —
+`npm run build` succeeding, and even `npm run preview` looking right, doesn't
+guarantee every file the app *references at runtime* (manifest icons, a
+service worker, fonts loaded by URL, etc.) actually made it into `dist/`.
+Check with `find dist -type f` against everything `index.html`/`manifest.json`
+reference, or curl the deployed URLs directly, rather than trusting a clean
+build log.
+
 ## The existing pattern
 
 This project has zero runtime npm dependencies today. `package.json` only lists
