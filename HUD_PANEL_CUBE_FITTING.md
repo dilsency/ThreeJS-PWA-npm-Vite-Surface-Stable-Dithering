@@ -4,7 +4,9 @@ Context: `main.js`'s `sceneHUD` setup builds a backdrop `EntityComponentBackgrou
 ("the panel") behind `EntityComponentTestCubeHUD` ("cubeHUD"). The panel needs to look
 like a snugly-fitted frame around the cube on screen. This doc covers why that can't be
 done by matching their world-space position/size directly, what the actual fix computes
-instead, and what it does and doesn't stay correct under.
+instead, and what it does and doesn't stay correct under. For cubeHUD's own alignment,
+pitch/yaw/roll, the live tuning tool, and the (not yet implemented) shear/skew idea, see
+`HUD_CUBE_ORIENTATION_AND_TUNING.md` instead — this doc stays scoped to the panel's fit.
 
 ## Why world-space matching doesn't work
 

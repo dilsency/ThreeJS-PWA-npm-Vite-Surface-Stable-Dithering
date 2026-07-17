@@ -438,15 +438,43 @@ function init()
             tuningContainer.style.font = "12px monospace";
             tuningContainer.style.padding = "6px";
             tuningContainer.style.zIndex = "1000";
+            tuningContainer.style.display = "none"; // hidden by default — see the show/hide toggle buttons below
 
-            const makeTuningInput = (labelText) =>
+            // Collapsed by default so this dev-only tool doesn't permanently occupy
+            // screen space: a small "v" button sits in its place until clicked, which
+            // reveals the full panel (now with its own "^" button, prepended as the
+            // panel's first child below, to collapse it again).
+            const tuningShowButton = document.createElement("button");
+            tuningShowButton.textContent = "v";
+            tuningShowButton.style.position = "fixed";
+            tuningShowButton.style.top = "0";
+            tuningShowButton.style.right = "0";
+            tuningShowButton.style.zIndex = "1000";
+            tuningShowButton.addEventListener("click", () =>
+            {
+                tuningContainer.style.display = "block";
+                tuningShowButton.style.display = "none";
+            });
+            document.body.appendChild(tuningShowButton);
+
+            const tuningHideButton = document.createElement("button");
+            tuningHideButton.textContent = "^";
+            tuningHideButton.style.display = "block";
+            tuningHideButton.addEventListener("click", () =>
+            {
+                tuningContainer.style.display = "none";
+                tuningShowButton.style.display = "block";
+            });
+            tuningContainer.appendChild(tuningHideButton);
+
+            const makeTuningInput = (labelText, step = 0.5) =>
             {
                 const label = document.createElement("label");
                 label.style.display = "block";
                 label.textContent = labelText;
                 const input = document.createElement("input");
                 input.type = "number";
-                input.step = "0.5";
+                input.step = String(step);
                 input.value = "0";
                 input.style.width = "70px";
                 label.appendChild(input);
@@ -457,9 +485,58 @@ function init()
             const pitchOffsetInput = makeTuningInput("pitch offset (deg): ");
             const yawOffsetInput = makeTuningInput("yaw offset (deg): ");
             const rollOffsetInput = makeTuningInput("roll offset (deg): ");
+            // All 6 possible shear directions for a 3D shear (each displaces one axis
+            // proportionally to a different one): x per y, x per z, y per x, y per z,
+            // z per x, z per y. "x per y" is the original one this was built for
+            // ("further up leans left"); the other five are here for comparison, same
+            // as pitch/yaw/roll's earlier live-tuning inputs.
+            const shearXYInput = makeTuningInput("shear (x per y): ", 0.1);
+            const shearXZInput = makeTuningInput("shear (x per z): ", 0.1);
+            const shearYXInput = makeTuningInput("shear (y per x): ", 0.1);
+            const shearYZInput = makeTuningInput("shear (y per z): ", 0.1);
+            const shearZXInput = makeTuningInput("shear (z per x): ", 0.1);
+            const shearZYInput = makeTuningInput("shear (z per y): ", 0.1);
+
+            // cubeHUD's mesh is normally added directly to sceneHUD with its position
+            // and rotation both set on itself (see EntityComponentTestCube). A shear
+            // can't be layered on top of that the same way rotation offsets are above:
+            // a shear matrix mixes x with y, so if it sat on the same node as the
+            // cube's own position (cubeHUDBaseOffset.y = -1.5, far larger than the
+            // cube's own ±0.25 half-extent), it would shift the cube's whole center
+            // sideways by a large amount instead of just distorting its local shape —
+            // see HUD_CUBE_ORIENTATION_AND_TUNING.md's shear section for the design
+            // rationale. Fixed by splitting position and shear onto separate nodes:
+            //   sceneHUD -> cubeHUDOuterNode (position only) -> cubeHUDShearWrapper
+            //     (shear matrix only, matrixAutoUpdate off) -> cube (rotation + geometry,
+            //     its own position reset to zero since the outer node now carries it)
+            // Built lazily (once, the first time the cube mesh actually exists — its
+            // async methodInitialize may not have finished yet) rather than at this
+            // point in init, and reused after that.
+            let cubeHUDOuterNode = null;
+            let cubeHUDShearWrapper = null;
+            const ensureCubeHUDShearHierarchy = () =>
+            {
+                if (cubeHUDOuterNode != null) { return true; }
+                const cube = componentCubeHUD.methodGetCube();
+                if (cube == null) { return false; } // component initialization is async and may not have finished yet
+
+                cubeHUDOuterNode = new THREE.Object3D();
+                cubeHUDOuterNode.position.copy(cube.position);
+
+                cubeHUDShearWrapper = new THREE.Object3D();
+                cubeHUDShearWrapper.matrixAutoUpdate = false; // this node only ever holds a directly-set shear matrix
+
+                sceneHUD.remove(cube);
+                cube.position.set(0, 0, 0); // position now lives on cubeHUDOuterNode instead
+                sceneHUD.add(cubeHUDOuterNode);
+                cubeHUDOuterNode.add(cubeHUDShearWrapper);
+                cubeHUDShearWrapper.add(cube);
+                return true;
+            };
 
             const applyTuning = () =>
             {
+                ensureCubeHUDShearHierarchy();
                 const cube = componentCubeHUD.methodGetCube();
                 if (cube == null) { return; } // component initialization is async and may not have finished yet
                 const pitchOffsetRadians = THREE.MathUtils.degToRad(parseFloat(pitchOffsetInput.value) || 0);
@@ -473,13 +550,50 @@ function init()
             yawOffsetInput.addEventListener("input", applyTuning);
             rollOffsetInput.addEventListener("input", applyTuning);
 
+            const applyShear = () =>
+            {
+                if (!ensureCubeHUDShearHierarchy()) { return; }
+                const shearXY = parseFloat(shearXYInput.value) || 0;
+                const shearXZ = parseFloat(shearXZInput.value) || 0;
+                const shearYX = parseFloat(shearYXInput.value) || 0;
+                const shearYZ = parseFloat(shearYZInput.value) || 0;
+                const shearZX = parseFloat(shearZXInput.value) || 0;
+                const shearZY = parseFloat(shearZYInput.value) || 0;
+                // All 6 terms combined into one matrix at once (each occupies its own,
+                // non-overlapping off-diagonal cell, so they don't interact/compound —
+                // this is NOT the same as chaining 6 separate shear matrices, which
+                // would introduce quadratic cross-terms between them). x per y keeps
+                // its established (negated) sign convention from before ("positive
+                // leans top-left/bottom-right"); the other five are new and use the
+                // plain target' = target + amount*source convention, since there's no
+                // prior convention of theirs to preserve. THREE.Matrix4.set(...) takes
+                // arguments in row-major order.
+                cubeHUDShearWrapper.matrix.set(
+                    1, -shearXY, shearXZ, 0,
+                    shearYX, 1, shearYZ, 0,
+                    shearZX, shearZY, 1, 0,
+                    0, 0, 0, 1,
+                );
+            };
+            shearXYInput.addEventListener("input", applyShear);
+            shearXZInput.addEventListener("input", applyShear);
+            shearYXInput.addEventListener("input", applyShear);
+            shearYZInput.addEventListener("input", applyShear);
+            shearZXInput.addEventListener("input", applyShear);
+            shearZYInput.addEventListener("input", applyShear);
+
             // Presets found to look decent by eye (pitch, yaw, roll offsets in
-            // degrees), so we can jump straight back to one instead of re-tuning by
-            // hand each time. Add more tuples here as more are found.
+            // degrees, plus all 6 shear directions), so we can jump straight back to
+            // one instead of re-tuning by hand each time. Add more tuples here as more
+            // are found. The first entry is a deliberate all-zero "reset" preset
+            // (labeled "0", see the button label below); preset "2" predates the 6
+            // shear inputs, so its shear values are all 0.0 — nothing to preserve,
+            // since shear didn't exist yet when it was recorded.
             const cubeHUDTuningPresets = [
-                { pitch: -15.5, yaw: -8.5, roll: 8.5 },
-                { pitch: -4.5, yaw: -8.5, roll: -1 },
-                { pitch: -18.5, yaw: -9, roll: 10.5 },
+                { pitch: 0.0, yaw: 0.0, roll: 0.0, shearXY: 0.0, shearXZ: 0.0, shearYX: 0.0, shearYZ: 0.0, shearZX: 0.0, shearZY: 0.0 },
+                { pitch: -15.5, yaw: -8.5, roll: 8.5, shearXY: 0.1, shearXZ: 0.15, shearYX: 0.0, shearYZ: 0.0, shearZX: 0.1, shearZY: 0.0 },
+                { pitch: -4.5, yaw: -8.5, roll: -1, shearXY: 0.0, shearXZ: 0.0, shearYX: 0.0, shearYZ: 0.0, shearZX: 0.0, shearZY: 0.0 },
+                { pitch: -16.5, yaw: -8, roll: 10.5, shearXY: 0.0, shearXZ: 0.0, shearYX: 0.0, shearYZ: 0.0, shearZX: 0.2, shearZY: 0.0 },
             ];
 
             const presetsLabel = document.createElement("div");
@@ -491,14 +605,23 @@ function init()
             cubeHUDTuningPresets.forEach((preset, presetIndex) =>
             {
                 const presetButton = document.createElement("button");
-                presetButton.textContent = String(presetIndex + 1);
-                presetButton.title = `pitch ${preset.pitch}, yaw ${preset.yaw}, roll ${preset.roll}`;
+                presetButton.textContent = String(presetIndex); // 0-based: the new all-zero "reset" preset is index/label 0
+                presetButton.title = `pitch ${preset.pitch}, yaw ${preset.yaw}, roll ${preset.roll}, `
+                    + `shearXY ${preset.shearXY}, shearXZ ${preset.shearXZ}, shearYX ${preset.shearYX}, `
+                    + `shearYZ ${preset.shearYZ}, shearZX ${preset.shearZX}, shearZY ${preset.shearZY}`;
                 presetButton.addEventListener("click", () =>
                 {
                     pitchOffsetInput.value = preset.pitch;
                     yawOffsetInput.value = preset.yaw;
                     rollOffsetInput.value = preset.roll;
+                    shearXYInput.value = preset.shearXY;
+                    shearXZInput.value = preset.shearXZ;
+                    shearYXInput.value = preset.shearYX;
+                    shearYZInput.value = preset.shearYZ;
+                    shearZXInput.value = preset.shearZX;
+                    shearZYInput.value = preset.shearZY;
                     applyTuning();
+                    applyShear();
                 });
                 presetsRow.appendChild(presetButton);
             });
@@ -532,13 +655,13 @@ function init()
                     plane.geometry = new THREE.PlaneGeometry(cubeHUDLayout.panelSize.width, cubeHUDLayout.panelSize.height);
                 }
 
-                const cube = componentCubeHUD.methodGetCube();
-                if (cube != null) // same as above
+                if (ensureCubeHUDShearHierarchy()) // same as above; also sets cube.position to (0,0,0), so position must go on cubeHUDOuterNode from here on
                 {
-                    cube.position.set(cubeHUDLayout.positionOffset.x, cubeHUDLayout.positionOffset.y, cubeHUDLayout.positionOffset.z);
+                    cubeHUDOuterNode.position.set(cubeHUDLayout.positionOffset.x, cubeHUDLayout.positionOffset.y, cubeHUDLayout.positionOffset.z);
                 }
 
                 applyTuning(); // refreshes rotation using the new base yaw plus whatever pitch/yaw/roll offsets are already dialed in
+                applyShear(); // shear wrapper survives reparenting untouched, but re-apply for consistency/safety
             });
             tuningContainer.appendChild(alignmentButton);
 
