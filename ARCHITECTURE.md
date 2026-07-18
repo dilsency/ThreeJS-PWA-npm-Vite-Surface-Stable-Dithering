@@ -71,6 +71,14 @@ Whether that was the deliberate reason for going custom, or simply how the
 project happened to start, isn't recorded anywhere — worth confirming with
 whoever set the original convention before treating this section as settled.
 
+Whatever the original motivation, ECS is now treated as *the* pattern for
+scene/entity behavior in this codebase, not one option among several — see
+`TEMPORARY_DEV_TOOLS_VS_ECS.md` for the concrete rule this implies: temporary,
+disposable code (like a dev-only tuning UI) is the one accepted exception, and
+even that should be converted into a proper `EntityComponent` if it's ever
+kept permanently, rather than allowed to grow as a plain-DOM/shared-local-variable
+exception to the pattern.
+
 ## Why a custom dithering shader instead of a material library (inferred, not confirmed)
 
 `shaders/Simple_FractalDithering.js` is a hand-written `THREE.ShaderMaterial`
@@ -104,3 +112,8 @@ nuanced than "CDN bad, npm good" or vice versa.
 - `HUD_DEPTH_CLEARING.md` / `HUD_PANEL_CUBE_FITTING.md` — HUD rendering specifics.
 - `LIGHT_MANAGER_COUPLING.md`, `LAN_MULTIPLAYER_CONSIDERATIONS.md`,
   `KNOWN_ISSUES.md` — other subsystem-specific decisions and known bugs.
+- `TEMPORARY_DEV_TOOLS_VS_ECS.md` — why the live cubeHUD tuning panel is a
+  deliberate, temporary exception to ECS, the rule for converting it (or any
+  similar dev tool) to a proper `EntityComponent` if ever kept permanently,
+  and the related rule against sharing local variables between components via
+  the init pipeline's closures.

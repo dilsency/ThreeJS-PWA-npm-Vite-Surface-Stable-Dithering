@@ -1,7 +1,13 @@
 # LAN multiplayer — considerations so far
 
-Status: decisions below are made for a two-phase plan; nothing is implemented
-yet. No networking code exists in this project yet.
+Status: decisions below are made for a two-phase plan; the phase-1 PeerJS
+pairing (one-time code, two players) is implemented and verified — see
+`entity components/peer_connection.js`. For scaling that connection past two
+players — topology (full mesh vs. host-relay), how a new player discovers
+everyone already in a session, and how position/facing-direction gets synced
+once connected — see `MULTIPLAYER_TOPOLOGY_AND_SYNC.md` instead; this doc
+stays scoped to discovery/signaling (how two players first find and connect
+to each other), not what happens after.
 
 ## The goal (long-term)
 

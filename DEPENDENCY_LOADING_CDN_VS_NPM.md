@@ -1,10 +1,12 @@
 # CDN imports vs. npm dependencies — the debate, for future reference
 
-Status: unresolved for PeerJS specifically. **Three.js has since been migrated
-off the CDN pattern this doc otherwise describes** — see "Outcome: the Three.js
-migration" below before assuming the rest of this doc reflects current source.
-Read this before adding any new runtime dependency (starting with PeerJS — see
-`LAN_MULTIPLAYER_CONSIDERATIONS.md`).
+Status: **resolved for PeerJS too — Option A (`npm install peerjs`) chosen.**
+Three.js was migrated off the CDN pattern this doc otherwise describes first
+(see "Outcome: the Three.js migration" below), and that migration is what
+resolved this: it verified, in production and not just in theory, that
+npm + Vite carries no PWA/GitHub-Pages risk. See "Decision: PeerJS via npm"
+below for the actual reasoning. Read this before adding any new runtime
+dependency.
 
 ## Outcome: the Three.js migration (this project only)
 
@@ -274,15 +276,18 @@ though today's no-op `sw.js` isn't exposed to it yet.
 
 ## The two options, for PeerJS specifically
 
-**Option A — `npm install peerjs`.** The standard way, and what virtually every
-PeerJS tutorial shows:
-- Adds a `dependencies` section to `package.json` (doesn't exist yet).
+**Option A — `npm install peerjs`. Chosen — see "Decision" below.**
+- Adds a `dependencies` section to `package.json` (already exists — `three` is
+  there since its own npm migration).
 - `import { Peer } from "peerjs";` — a bare specifier, resolved natively by
   Vite, no config changes needed.
-- Tradeoff: breaks the "everything's CDN, nothing needs `npm install`"
-  character the rest of the project has, and would stop working if the
-  non-bundled/importmap deployment path `index.html` keeps around were ever
-  actually used.
+- The tradeoff this used to carry — breaking the "everything's CDN, nothing
+  needs `npm install`" character of the project, and depending on a
+  non-bundled/importmap deployment path — no longer applies: that CDN
+  character is already gone (Three.js moved to npm first), and the
+  commented-out importmap fallback in `index.html` was deleted outright (see
+  "Outcome: the Three.js migration" above), not kept as a live alternative
+  path. There's nothing left for adding a second npm dependency to break.
 
 **Option B — CDN import, matching the Three.js pattern.**
 - No `npm install`. Import from jsdelivr instead, e.g.
@@ -298,16 +303,44 @@ PeerJS tutorial shows:
   exposing a global `Peer`, with `peer_connection.js` referencing `window.Peer`
   directly instead of using an `import` statement.
 
-## Current lean, and why
+## Decision: PeerJS via npm
 
-Lean toward **Option B**, given:
-- Direct precedent already in this codebase (Three.js).
-- The user's stated primary constraint — GitHub Pages working smoothly — and
-  prior scar tissue on exactly this class of PWA/bundler problem.
-- It keeps this whole risk category closed off for one more dependency, rather
-  than needing to re-reason about it once the service worker grows real
-  caching logic.
+**Option A (`npm install peerjs`) is what we're going with**, reversing this
+doc's earlier lean toward Option B (CDN). What changed: the original lean was
+driven entirely by risk-aversion around PWA/service-worker caching interacting
+badly with a bundler's content-hashed filenames — the user's prior-project
+scar tissue described throughout this doc — while npm + Vite for a real
+dependency was still hypothetical here. It stopped being hypothetical once
+Three.js actually made that exact move: `npm install three`, full Vite bundling,
+verified working correctly both locally (`npm run dev`/`preview`) **and in
+production** — deployed, installed as a PWA, and re-checked after deploy,
+with the one real bug that surfaced (the resurrected CDN import map from an
+HTML-comment parsing quirk — see "Outcome" above) being about a leftover
+*CDN* artifact, not about npm/bundling itself. That was the specific,
+previously-unverified risk this doc kept citing; it's now closed.
 
-Not yet finalized as a hard decision — revisit when actually wiring up
-`EntityComponentPeerConnection`'s commented-out real implementation (see
-`LAN_MULTIPLAYER_CONSIDERATIONS.md`, "Phase 1 plan: the one-time code UI").
+With that risk resolved, Option B's remaining advantages (matching a
+CDN-everywhere character, avoiding a second `npm install`) aren't worth
+trading away Option A's simplicity (a bare specifier, no `+esm`/UMD-global
+uncertainty to verify at implementation time, consistent with how `three` is
+already imported).
+
+**Scope of this decision — browser only.** PeerJS's `RTCDataChannel`
+transport is still exactly what phase 1 (`LAN_MULTIPLAYER_CONSIDERATIONS.md`)
+uses for the manual one-time-code browser experience. It is **not** the
+long-term answer for LAN discovery — that remains the phase-2 native
+Electron app, using real OS-level sockets (Node's `dgram` in the main
+process) specifically because that's the only way to get genuine
+broadcast-based LAN discovery with **zero external services**, including no
+dependency on PeerJS's public broker at all. PeerJS-via-npm and the future
+Electron sockets path are not competing answers to the same question — they
+solve different halves of "the goal" (see that doc's "Future path" section):
+PeerJS gets real peer-to-peer gameplay traffic working and testable now, in
+any browser; native sockets are what eventually make discovery itself
+automatic and fully LAN-contained, no relay/broker of any kind.
+
+Done: `npm install peerjs` has been run, and `entity components/peer_connection.js`'s
+hardcoded fake id (`"TEST1234"`) has been replaced with the real `Peer`-based
+implementation described above. Remaining testing (two real browser tabs/
+machines actually pairing over PeerJS's public broker) is tracked in
+`LAN_MULTIPLAYER_CONSIDERATIONS.md`, not here.

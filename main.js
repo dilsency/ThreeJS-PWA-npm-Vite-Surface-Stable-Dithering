@@ -24,6 +24,8 @@ import {EntityComponentDirectionalLight} from "./entity components/lighting.js";
 import {EntityComponentLightManager} from "./entity components/lighting.js";
 import {EntityComponentPeerConnection} from "./entity components/peer_connection.js";
 import {EntityComponentPeerConnectionUI} from "./entity components/peer_connection.js";
+import {EntityComponentPlayerNetworkSync} from "./entity components/player_network_sync.js";
+import {EntityComponentRemotePlayerManager} from "./entity components/remote_player_manager.js";
 
 // bare minimum
 var scene;
@@ -128,6 +130,41 @@ function init()
         //
         console.log("init Entities");
 
+        // Local player identity, chosen once at startup (not re-rolled per
+        // frame) - the cubeHUD shape/color1/color2 below, and also broadcast
+        // once to every connected peer via EntityComponentPlayerNetworkSync so
+        // their EntityComponentRemotePlayerManager can skin this player's
+        // remote-representation cube to match (see
+        // MULTIPLAYER_TOPOLOGY_AND_SYNC.md). The two color indices are
+        // guaranteed distinct - rejection sampling is fine here since the
+        // palette is tiny and this only runs once. 0-9 for the shape matches
+        // uShape's full valid range (see
+        // shaders/Simple_FractalDithering.frag's SDF_Shape comment).
+        const playerColorPaletteBody = Object.freeze(["hsl(223, 56.6%, 26.6%)", "hsl(0, 56.6%, 27.3%)", "hsl(180, 42.8%, 26.8%)", "hsl(218, 42.8%, 10.6%)"]);
+        const playerColorPaletteDither = Object.freeze(["hsl(37, 56%, 62.5%)", "hsl(128, 56.6%, 63.7%)", "hsl(318, 42.8%, 68%)", "hsl(74, 51.9%, 87.9%)"]);
+        const localPlayerColorIndex1 = Math.floor(Math.random() * playerColorPaletteBody.length);
+        let localPlayerColorIndex2 = Math.floor(Math.random() * playerColorPaletteDither.length);
+        const localCubeHUDShapeIndex = Math.floor(Math.random() * 10);
+
+        // Ground reference - defined once here and reused below for the
+        // actual ground EntityComponentTestCube, so the two can never drift
+        // out of sync. Used to give each player a random local spawn
+        // X/Z somewhere on the ground's actual footprint rather than the
+        // same hardcoded point every player used to start at (which put
+        // every remote player's cube exactly on top of your own camera -
+        // see MULTIPLAYER_TOPOLOGY_AND_SYNC.md). Computed from these
+        // construction-time values rather than the ground's live THREE.Mesh,
+        // since EntityComponentTestCube's mesh isn't built until its async
+        // methodInitialize() resolves, well after this point.
+        const groundSize = new THREE.Vector3(20, 0.2, 20);
+        const groundPositionOffset = {x: 0, y: -1.5, z: 0};
+        const groundMinX = groundPositionOffset.x - groundSize.x / 2;
+        const groundMaxX = groundPositionOffset.x + groundSize.x / 2;
+        const localPlayerStartX = groundMinX + Math.random() * (groundMaxX - groundMinX);
+        const groundMinZ = groundPositionOffset.z - groundSize.z / 2;
+        const groundMaxZ = groundPositionOffset.z + groundSize.z / 2;
+        const localPlayerStartZ = groundMinZ + Math.random() * (groundMaxZ - groundMinZ);
+
         //
         const entityA = new Entity(null);
         entityManager.methodAddEntity(entityA, "player");
@@ -137,10 +174,19 @@ function init()
         //
         entityA.methodAddComponentWithName("EntityComponentPlayerController", new EntityComponentPlayerController({cameraPivot: cameraPivot,}));
         entityA.methodAddComponentWithName("EntityComponentPlayerControllerInput", new EntityComponentPlayerControllerInput());
+        //
+        // LAN multiplayer (see MULTIPLAYER_TOPOLOGY_AND_SYNC.md): broadcasts this
+        // player's own position/facing-direction to every connected peer.
+        entityA.methodAddComponentWithName("EntityComponentPlayerNetworkSync", new EntityComponentPlayerNetworkSync({
+            shapeIndex: localCubeHUDShapeIndex,
+            colorIndex1: localPlayerColorIndex1,
+            colorIndex2: localPlayerColorIndex2,
+        }));
 
-        entityA.methodSetPosition(new THREE.Vector3(0.0,0.0,5.0));
+        entityA.methodSetPosition(new THREE.Vector3(localPlayerStartX,0.0,localPlayerStartZ));
         //
 
+        /*
         //
         const entityB = new Entity(null);
         entityManager.methodAddEntity(entityB, "cubeCircle");
@@ -170,11 +216,12 @@ function init()
         const entityCubeF = new Entity(null);
         entityManager.methodAddEntity(entityCubeF, "cubeF");
         entityCubeF.methodAddComponentWithName("EntityComponentTestCube", new EntityComponentTestCube({scene:scene,name:"CubeF",lighting:true,positionOffset:{x:10,y:0,z:0},color1Texture:true,color2:0xff0000,textureFile:'texture_checkerboard_alphamask.png',shape:5,}));
+        */
 
         //
         const entityGround = new Entity(null);
         entityManager.methodAddEntity(entityGround, "ground");
-        entityGround.methodAddComponentWithName("EntityComponentTestCube", new EntityComponentTestCube({scene:scene,name:"ground",lighting:true,spin:false,size:new THREE.Vector3(20,0.2,20),positionOffset:{x:0,y:-1.5,z:0},shape:6,}));
+        entityGround.methodAddComponentWithName("EntityComponentTestCube", new EntityComponentTestCube({scene:scene,name:"ground",lighting:true,spin:false,size:groundSize,positionOffset:groundPositionOffset,shape:6,}));
 
         //
         const entityLight = new Entity(null);
@@ -186,7 +233,8 @@ function init()
         //
         const entityC = new Entity(null);
         entityManager.methodAddEntity(entityC, "pointerLockButton");
-        entityC.methodAddComponentWithName("EntityComponentButtonPointerLock", new EntityComponentButtonPointerLock({document:document,renderer:renderer,}));
+        const componentPointerLockButton = new EntityComponentButtonPointerLock({document:document,renderer:renderer,});
+        entityC.methodAddComponentWithName("EntityComponentButtonPointerLock", componentPointerLockButton);
 
         const entityD = new Entity(null);
         entityManager.methodAddEntity(entityD, "testEntityPositionOnly");
@@ -215,6 +263,7 @@ function init()
         const HUDCubeHorizontalAlignmentEnum = Object.freeze({
             CENTER: "CENTER", // unchanged from before: cubeHUD sits centered, x offset 0
             LEFT: "LEFT", // the *panel* (not the cube) sits flush with the screen's left edge
+            RIGHT: "RIGHT", // mirrors LEFT: the *panel* sits flush with the screen's right edge
         });
         const cubeHUDHorizontalAlignment = HUDCubeHorizontalAlignmentEnum.LEFT;
 
@@ -309,8 +358,47 @@ function init()
                     offsetX += targetWorldX - currentWorldX;
                 }
             }
-            // else: CENTER (and, one day, RIGHT — not implemented yet, see the cycling
-            // button below) defaults to offsetX = 0.
+            else if (alignment === HUDCubeHorizontalAlignmentEnum.RIGHT)
+            {
+                // Mirrors the LEFT branch above exactly, for the screen's right edge:
+                // same iterative solve, same reasoning for why NDC x must be compared
+                // (not raw world x) and why it targets the *panel's* edge rather than
+                // the cube's own — just targeting NDC x = +1 and searching for the
+                // cube's rightmost (max NDC x) corner instead of leftmost.
+                const rightAlignPanelInsetPx = 0; // 0 = panel's edge flush against the screen edge
+                const targetPanelNdcX = 1 - rightAlignPanelInsetPx * ndcPerPixelX;
+                const targetCubeNdcX = targetPanelNdcX + panelInsetSidePx * ndcPerPixelX;
+
+                for (let pass = 0; pass < 6; pass++)
+                {
+                    const yawProxy = new THREE.Object3D();
+                    yawProxy.position.set(offsetX, cameraHUD.position.y, cubeHUDBaseOffset.z);
+                    yawProxy.lookAt(cameraHUD.position);
+                    const yawGuess = yawProxy.rotation.y;
+
+                    const alignProxy = new THREE.Object3D();
+                    alignProxy.position.set(offsetX, cubeHUDBaseOffset.y, cubeHUDBaseOffset.z);
+                    alignProxy.rotation.x = cubeHUDTiltRadians;
+                    alignProxy.rotation.y = (hudPanelYawBehavior === HUDPanelYawBehaviorEnum.MATCH_CUBE) ? yawGuess : 0;
+                    alignProxy.updateMatrixWorld(true);
+
+                    let maxNdcX = -Infinity, maxCornerWorldZ = 0;
+                    for (const signX of [-1, 1]) for (const signY of [-1, 1]) for (const signZ of [-1, 1])
+                    {
+                        const world = new THREE.Vector3(signX * cubeHUDHalf.x, signY * cubeHUDHalf.y, signZ * cubeHUDHalf.z)
+                            .applyMatrix4(alignProxy.matrixWorld);
+                        const ndcX = world.clone().project(cameraHUD).x;
+                        if (ndcX > maxNdcX) { maxNdcX = ndcX; maxCornerWorldZ = world.z; }
+                    }
+
+                    const cornerNdcZ = new THREE.Vector3(0, 0, maxCornerWorldZ).project(cameraHUD).z;
+                    const currentWorldX = new THREE.Vector3(maxNdcX, 0, cornerNdcZ).unproject(cameraHUD).x;
+                    const targetWorldX = new THREE.Vector3(targetCubeNdcX, 0, cornerNdcZ).unproject(cameraHUD).x;
+
+                    offsetX += targetWorldX - currentWorldX;
+                }
+            }
+            // else: CENTER defaults to offsetX = 0.
             const positionOffset = {x: offsetX, y: cubeHUDBaseOffset.y, z: cubeHUDBaseOffset.z};
 
             // Exact yaw correction: a horizontally off-center cubeHUD, with rotation.y
@@ -409,6 +497,7 @@ function init()
             size:cubeHUDLayout.panelSize,
         });
         entityHUD.methodAddComponentWithName("EntityComponentBackgroundPlane", componentPanelHUD);
+
         const componentCubeHUD = new EntityComponentTestCubeHUD({scene:sceneHUD,name:"model",
             positionOffset:cubeHUDLayout.positionOffset,
             size:cubeHUDSize,
@@ -416,7 +505,11 @@ function init()
             yawRadians:cubeHUDLayout.yawRadians,
             spin:false,
             lighting:true,
-            shape:7,
+            shape:localCubeHUDShapeIndex,
+            // base/body color and dither-dot/SDF-shape color - see the local
+            // player identity block above for the palette and index rolls.
+            color1:playerColorPaletteBody[localPlayerColorIndex1],
+            color2:playerColorPaletteDither[localPlayerColorIndex2],
         });
         entityHUD.methodAddComponentWithName("EntityComponentTestCubeHUD", componentCubeHUD);
 
@@ -596,6 +689,44 @@ function init()
                 { pitch: -16.5, yaw: -8, roll: 10.5, shearXY: 0.0, shearXZ: 0.0, shearYX: 0.0, shearYZ: 0.0, shearZX: 0.2, shearZY: 0.0 },
             ];
 
+            const applyPreset = (preset) =>
+            {
+                pitchOffsetInput.value = preset.pitch;
+                yawOffsetInput.value = preset.yaw;
+                rollOffsetInput.value = preset.roll;
+                shearXYInput.value = preset.shearXY;
+                shearXZInput.value = preset.shearXZ;
+                shearYXInput.value = preset.shearYX;
+                shearYZInput.value = preset.shearYZ;
+                shearZXInput.value = preset.shearZX;
+                shearZYInput.value = preset.shearZY;
+                applyTuning();
+                applyShear();
+            };
+
+            // Preset "1" is the actual startup default now (not just an
+            // all-zero resting state), matching the cubeHUDHorizontalAlignment
+            // default (LEFT) above in spirit. applyTuning()/applyShear() inside
+            // applyPreset() no-op until cubeHUD's mesh exists (its
+            // methodInitialize() is async, so it isn't ready yet at this point
+            // in init) - applyPreset() still sets the input values immediately
+            // regardless, and this retries each frame until the cube exists to
+            // actually apply the rotation/shear to it once, matching the same
+            // "guard on the cube existing, retry" pattern as
+            // ensureCubeHUDShearHierarchy() above.
+            applyPreset(cubeHUDTuningPresets[1]);
+            const applyDefaultPresetOnceCubeReady = () =>
+            {
+                if (componentCubeHUD.methodGetCube() == null)
+                {
+                    requestAnimationFrame(applyDefaultPresetOnceCubeReady);
+                    return;
+                }
+                applyTuning();
+                applyShear();
+            };
+            applyDefaultPresetOnceCubeReady();
+
             const presetsLabel = document.createElement("div");
             presetsLabel.style.marginTop = "4px";
             presetsLabel.textContent = "presets:";
@@ -609,30 +740,13 @@ function init()
                 presetButton.title = `pitch ${preset.pitch}, yaw ${preset.yaw}, roll ${preset.roll}, `
                     + `shearXY ${preset.shearXY}, shearXZ ${preset.shearXZ}, shearYX ${preset.shearYX}, `
                     + `shearYZ ${preset.shearYZ}, shearZX ${preset.shearZX}, shearZY ${preset.shearZY}`;
-                presetButton.addEventListener("click", () =>
-                {
-                    pitchOffsetInput.value = preset.pitch;
-                    yawOffsetInput.value = preset.yaw;
-                    rollOffsetInput.value = preset.roll;
-                    shearXYInput.value = preset.shearXY;
-                    shearXZInput.value = preset.shearXZ;
-                    shearYXInput.value = preset.shearYX;
-                    shearYZInput.value = preset.shearYZ;
-                    shearZXInput.value = preset.shearZX;
-                    shearZYInput.value = preset.shearZY;
-                    applyTuning();
-                    applyShear();
-                });
+                presetButton.addEventListener("click", () => applyPreset(preset));
                 presetsRow.appendChild(presetButton);
             });
             tuningContainer.appendChild(presetsRow);
 
-            // Cycles cubeHUDHorizontalAlignment live. Only CENTER/LEFT exist so far —
-            // RIGHT is planned (see HUDCubeHorizontalAlignmentEnum above) but not
-            // implemented yet, so it's deliberately left out of this list rather than
-            // added as a no-op; extend this array (and computeCubeHUDLayout's LEFT
-            // branch, mirrored for RIGHT) once it exists.
-            const cubeHUDAlignmentCycle = [HUDCubeHorizontalAlignmentEnum.CENTER, HUDCubeHorizontalAlignmentEnum.LEFT];
+            // Cycles cubeHUDHorizontalAlignment live through all three states.
+            const cubeHUDAlignmentCycle = [HUDCubeHorizontalAlignmentEnum.CENTER, HUDCubeHorizontalAlignmentEnum.LEFT, HUDCubeHorizontalAlignmentEnum.RIGHT];
             let cubeHUDAlignmentCycleIndex = Math.max(0, cubeHUDAlignmentCycle.indexOf(cubeHUDHorizontalAlignment));
 
             const alignmentButton = document.createElement("button");
@@ -665,6 +779,22 @@ function init()
             });
             tuningContainer.appendChild(alignmentButton);
 
+            // Reparent the PointerLock button (created fixed/centered at the bottom of the
+            // screen by EntityComponentButtonPointerLock) into the expanded tuning panel.
+            // methodInitialize() there is synchronous (unlike the cube/panel's async mesh
+            // setup), so the button element already exists at this point — no readiness
+            // guard needed. Its click handler and pointer-lock-state-driven show/hide
+            // logic (methodOnPointerLockChange) are untouched; only its own inline
+            // positioning styles are cleared so it flows in the panel like the other
+            // buttons instead of staying fixed to the viewport.
+            const pointerLockButtonElement = componentPointerLockButton.methodGetElementButton();
+            pointerLockButtonElement.style.position = "static";
+            pointerLockButtonElement.style.bottom = "";
+            pointerLockButtonElement.style.left = "";
+            pointerLockButtonElement.style.right = "";
+            pointerLockButtonElement.style.marginTop = "4px";
+            tuningContainer.appendChild(pointerLockButtonElement);
+
             document.body.appendChild(tuningContainer);
         }
 
@@ -687,14 +817,18 @@ function init()
 
         //
         // LAN multiplayer, phase 1 (see LAN_MULTIPLAYER_CONSIDERATIONS.md): the
-        // manual one-time code UI. EntityComponentPeerConnection currently uses a
-        // fake id/no real PeerJS connection; EntityComponentPeerConnectionUI reads
+        // manual one-time code UI, backed by a real PeerJS connection.
+        // EntityComponentPeerConnectionUI reads the local code/connection state
         // from it via the usual sibling lookup and won't mount its DOM at all when
         // run inside a future native (Electron/Tauri) build.
         const entityMultiplayer = new Entity(null);
         entityManager.methodAddEntity(entityMultiplayer, "multiplayer");
         entityMultiplayer.methodAddComponentWithName("EntityComponentPeerConnection", new EntityComponentPeerConnection());
         entityMultiplayer.methodAddComponentWithName("EntityComponentPeerConnectionUI", new EntityComponentPeerConnectionUI());
+        // Spawns/despawns a placeholder cube per connected remote player and
+        // applies their incoming position/rotation updates - see
+        // MULTIPLAYER_TOPOLOGY_AND_SYNC.md.
+        entityMultiplayer.methodAddComponentWithName("EntityComponentRemotePlayerManager", new EntityComponentRemotePlayerManager({scene: scene, entityManager: entityManager, colorPaletteBody: playerColorPaletteBody, colorPaletteDither: playerColorPaletteDither,}));
     }
 
     //

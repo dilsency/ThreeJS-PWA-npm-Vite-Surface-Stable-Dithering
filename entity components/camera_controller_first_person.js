@@ -113,6 +113,15 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
     get directionForward(){return this.#directionForward;}
     get directionForwardNonvertical(){return this.#directionForwardNonvertical;}
     get directionRightNonvertical(){return this.#directionRightNonvertical;}
+
+    // Facing direction as yaw/pitch scalars (radians), for network sync (see
+    // MULTIPLAYER_TOPOLOGY_AND_SYNC.md) rather than the direction vectors
+    // above - cameraPivot only ever rotates on Y (rotateY) and camera only
+    // ever rotates on X (rotateX), so their plain Euler components already
+    // are the yaw/pitch, with no decomposition needed.
+    methodGetPosition(){return this.#params.cameraPivot.position;}
+    methodGetYaw(){return this.#params.cameraPivot.rotation.y;}
+    methodGetPitch(){return this.#params.camera.rotation.x;}
     methodInitialize()
     {
         this.#directionForward = new THREE.Vector3(0,0,-1);

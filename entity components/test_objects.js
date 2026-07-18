@@ -3,14 +3,50 @@
 import * as THREE from "three";
 // ECS
 import {EntityComponent} from "../classes/ECS/entity_component.js";
-import { createFractalMaterial, createFractalMaterialFromSources } from "../shaders/Simple_FractalDithering.js";
-// Removed Vite `?raw` static imports to avoid MIME/type module errors on
-// GitHub Pages. Shaders will be loaded at runtime via fetch as a safe fallback.
-// When a bundler inlines sources, `createFractalMaterialFromSources` can still
-// be used by passing explicit sources. For portability, we initialize these
-// to null so the runtime-fetch path is used by default.
-let vertSource = null;
-let fragSource = null;
+import { createFractalMaterialFromSources, loadFractalShaderSources } from "../shaders/Simple_FractalDithering.js";
+
+// Shader source and texture caching (see SHADER_SOURCE_AND_TEXTURE_CACHING.md):
+// every EntityComponentTestCube instance - world cubes, ground, cubeHUD, and
+// remote-player cubes spawned mid-session over PeerJS - needs the same shader
+// source text and (at most two) texture files, regardless of its own
+// shape/color1/color2, which are runtime uniforms, not baked into that text.
+// Memoizing the in-flight Promise (not just the resolved value) means
+// several cubes initializing around the same time share one fetch/decode
+// instead of each kicking off their own.
+let cachedShaderSourcesPromise = null;
+function getCachedShaderSources()
+{
+    if(cachedShaderSourcesPromise == null)
+    {
+        cachedShaderSourcesPromise = loadFractalShaderSources();
+    }
+    return cachedShaderSourcesPromise;
+}
+
+const cachedTexturePromises = new Map(); // textureFile -> Promise<THREE.Texture>
+function getCachedTexture(textureFile)
+{
+    if(!cachedTexturePromises.has(textureFile))
+    {
+        const loader = new THREE.TextureLoader();
+        // Resolve texture URL via import.meta.url so Vite will include the asset
+        // in the build output. This works in dev and in the production build.
+        // Vite only statically bundles `new URL(literal, import.meta.url)` asset
+        // references for production builds, so each known texture file needs its
+        // own literal branch here rather than a dynamically-built path.
+        let texUrl;
+        try {
+            texUrl = textureFile === 'texture_checkerboard_alphamask.png'
+                ? new URL('../textures/texture_checkerboard_alphamask.png', import.meta.url).href
+                : new URL('../textures/texture_checkerboard.png', import.meta.url).href;
+        } catch (e) {
+            // Fallback: use path relative to server root
+            texUrl = 'textures/' + textureFile;
+        }
+        cachedTexturePromises.set(textureFile, new Promise((res, rej) => loader.load(texUrl, res, undefined, rej)));
+    }
+    return cachedTexturePromises.get(textureFile);
+}
 
 //
 export class EntityComponentTestCube extends EntityComponent
@@ -100,54 +136,16 @@ export class EntityComponentTestCube extends EntityComponent
         //
             const geometry = new THREE.BoxGeometry( this.#size.x, this.#size.y, this.#size.z );
 
-            const loader = new THREE.TextureLoader();
-            // Resolve texture URL via import.meta.url so Vite will include the asset
-            // in the build output. This works in dev and in the production build.
-            // Vite only statically bundles `new URL(literal, import.meta.url)` asset
-            // references for production builds, so each known texture file needs its
-            // own literal branch here rather than a dynamically-built path.
-            let texUrl;
-            try {
-                texUrl = this.#textureFile === 'texture_checkerboard_alphamask.png'
-                    ? new URL('../textures/texture_checkerboard_alphamask.png', import.meta.url).href
-                    : new URL('../textures/texture_checkerboard.png', import.meta.url).href;
-            } catch (e) {
-                // Fallback: use path relative to server root
-                texUrl = 'textures/' + this.#textureFile;
-            }
-            const texture = await new Promise((res, rej) => loader.load(texUrl, res, undefined, rej));
+            // Shared across every EntityComponentTestCube instance requesting
+            // the same texture file / the shader source - see
+            // SHADER_SOURCE_AND_TEXTURE_CACHING.md for why this doesn't cost
+            // this cube any of its own shape/color1/color2 customization: the
+            // material below is still built fresh, per instance, from these
+            // shared inputs.
+            const texture = await getCachedTexture(this.#textureFile);
+            const { vertexShader, fragmentShader } = await getCachedShaderSources();
 
-            // Prefer bundler raw imports (Vite: ?raw) to avoid runtime fetches.
-            // However, built output may sometimes emit shader assets instead of inlining
-            // the raw strings. Detect that case and fall back to the runtime-fetching
-            // factory if the imported sources are not plain strings.
-            let material;
-            try {
-                const isVertString = typeof vertSource === 'string';
-                const isFragString = typeof fragSource === 'string';
-
-                // Heuristic: if the imported string looks like actual GLSL source (contains newlines
-                // or shader keywords) treat it as source. If it looks like a URL/path (no newlines,
-                // short, or ends with .vert/.frag), treat it as an asset URL and let the runtime fetch
-                // loader load it from that URL.
-                const looksLikeSource = (s) => typeof s === 'string' && (s.includes('\n') || s.includes('void main') || s.length > 500);
-
-                if (isVertString && isFragString && looksLikeSource(vertSource) && looksLikeSource(fragSource)) {
-                    // Inlined shader sources (dev or bundle-inlined)
-                    material = createFractalMaterialFromSources(vertSource, fragSource, { map: texture, level: 3, shape: this.#shape, lighting: this.#lighting, debugNormals: this.#debugNormals, color1: this.#color1, color2: this.#color2, color1Texture: this.#color1Texture, color2BlendTexture: this.#color2BlendTexture });
-                } else if (isVertString && isFragString) {
-                    // Likely URLs emitted by the build. Use the runtime factory with explicit URLs.
-                    material = await createFractalMaterial({ map: texture, level: 3, shape: this.#shape, lighting: this.#lighting, debugNormals: this.#debugNormals, color1: this.#color1, color2: this.#color2, color1Texture: this.#color1Texture, color2BlendTexture: this.#color2BlendTexture, vertUrl: vertSource, fragUrl: fragSource });
-                } else {
-                    // fallback: runtime fetch (works with any static server)
-                    material = await createFractalMaterial({ map: texture, level: 3, shape: this.#shape, lighting: this.#lighting, debugNormals: this.#debugNormals, color1: this.#color1, color2: this.#color2, color1Texture: this.#color1Texture, color2BlendTexture: this.#color2BlendTexture });
-                }
-            } catch (err) {
-                // If anything goes wrong, fall back to runtime-fetching factory.
-                console.warn('Shader raw import failed or unavailable, using runtime fetch fallback.', err);
-                material = await createFractalMaterial({ map: texture, level: 3, shape: this.#shape, lighting: this.#lighting, debugNormals: this.#debugNormals, color1: this.#color1, color2: this.#color2, color1Texture: this.#color1Texture, color2BlendTexture: this.#color2BlendTexture });
-            }
-
+            const material = createFractalMaterialFromSources(vertexShader, fragmentShader, { map: texture, level: 3, shape: this.#shape, lighting: this.#lighting, debugNormals: this.#debugNormals, color1: this.#color1, color2: this.#color2, color1Texture: this.#color1Texture, color2BlendTexture: this.#color2BlendTexture });
 
             this.#cube = new THREE.Mesh(geometry, material);
             this.#cube.castShadow = true;
@@ -378,6 +376,11 @@ export class EntityComponentButtonPointerLock extends EntityComponent
     }
 
     //
+
+    methodGetElementButton()
+    {
+        return this.#elementButton;
+    }
 
     async methodOnClickButton(e)
     {

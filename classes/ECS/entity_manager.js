@@ -51,6 +51,15 @@ export class EntityManager
         paramEntity.methodInitialize();
     }
 
+    // removers
+
+    methodRemoveEntity(paramEntity)
+    {
+        const index = this.#entities.indexOf(paramEntity);
+        if(index === -1){return;}
+        this.#entities.splice(index, 1);
+    }
+
     // getters
 
     methodGetEntityByIndex(index)

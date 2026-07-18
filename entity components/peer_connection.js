@@ -1,43 +1,59 @@
 // imports
 // base
 import {EntityComponent} from "../classes/ECS/entity_component.js";
-// PeerJS is not yet a project dependency. Once it's added for real, this file
-// would need something like `import { Peer } from "peerjs";` (or a CDN
-// script-tag global, matching how this project currently loads Three.js) — see
-// LAN_MULTIPLAYER_CONSIDERATIONS.md, "Phase 1 plan: the one-time code UI".
+import {Peer} from "peerjs";
 
 // Owns the PeerJS connection lifecycle and the local "one-time code" (a short,
 // human-typeable id registered with PeerJS's public broker). No DOM/UI of its
 // own — EntityComponentPeerConnectionUI reads from this via the normal sibling
-// component lookup.
+// component lookup. See LAN_MULTIPLAYER_CONSIDERATIONS.md, "Phase 1 plan: the
+// one-time code UI", and DEPENDENCY_LOADING_CDN_VS_NPM.md's "Decision: PeerJS
+// via npm" for why this is npm (`import {Peer} from "peerjs"`) rather than a
+// CDN script tag.
 //
-// The real implementation is written out below but commented out, since PeerJS
-// isn't wired up yet; a fake id is used in its place so
-// EntityComponentPeerConnectionUI can be built and tested without any real
-// networking.
+// Holds a map of connections (peerId -> DataConnection) rather than a single
+// connection, since a full-mesh session (see MULTIPLAYER_TOPOLOGY_AND_SYNC.md)
+// means one player can end up directly connected to several others at once —
+// this component only owns that transport, not mesh-formation policy or
+// gameplay state, which belong in their own components per that doc.
 export class EntityComponentPeerConnection extends EntityComponent
 {
     // bare minimum
     #params = null;
 
     //
+    #peer = null;
     #localId = null;
     #isOpen = false;
+
+    //
+    #connections = new Map(); // peerId -> DataConnection
+    #connectionIsHost = new Map(); // peerId -> boolean
+    #pendingMessages = []; // [{peerId, message}], drained by whoever consumes them (e.g. EntityComponentRemotePlayerManager)
 
     // construct
     constructor(params)
     {
         super(params);
         this.#params = params;
+
+        // A tab closing/refreshing/navigating away sends no WebRTC teardown
+        // signal on its own, so the remote side's connection 'close' event
+        // can go unfired for a long time (observed: still not fired 60s
+        // later in testing) - explicitly destroying the peer here closes
+        // every connection right away so the remote side's cube despawns
+        // promptly. Registered once, in the constructor rather than
+        // methodInitialize (which can re-run on an 'unavailable-id' retry -
+        // see below), and reads `this.#peer` at actual unload time, not
+        // registration time, so it always targets whichever peer is current.
+        // This only covers a clean close/navigate, not a real crash or
+        // network drop - see MULTIPLAYER_TOPOLOGY_AND_SYNC.md.
+        window.addEventListener('beforeunload', () => {
+            if(this.#peer != null){this.#peer.destroy();}
+        });
     }
 
     // lifecycle
-
-    /*
-    // Real implementation (commented out until PeerJS is added as a project
-    // dependency and actually wired up). Would need one more field declared
-    // alongside #localId/#isOpen above:
-    //     #peer = null;
 
     methodInitialize()
     {
@@ -62,41 +78,9 @@ export class EntityComponentPeerConnection extends EntityComponent
         });
 
         this.#peer.on('connection', (conn) => {
-            this.methodHandleConnection(conn);
+            // someone connected to us using our own code - we're the host
+            this.methodHandleConnection(conn, true);
         });
-    }
-
-    methodGenerateShortId()
-    {
-        // short, human-typeable: 4 digits
-        return String(Math.floor(1000 + Math.random() * 9000));
-    }
-
-    methodConnectToRemoteId(remoteId)
-    {
-        if(this.#peer == null){return;}
-        const conn = this.#peer.connect(remoteId);
-        this.methodHandleConnection(conn);
-    }
-
-    methodHandleConnection(conn)
-    {
-        conn.on('open', () => {
-            console.log("EntityComponentPeerConnection: connected to", conn.peer);
-        });
-        conn.on('data', (data) => {
-            console.log("EntityComponentPeerConnection: received data:", data);
-        });
-    }
-    */
-
-    methodInitialize()
-    {
-        // TEMP: fake id/connection state, no real PeerJS wiring yet. Swap this
-        // out for the commented-out real implementation above once PeerJS is
-        // added as a project dependency.
-        this.#localId = "TEST1234";
-        this.#isOpen = true;
     }
 
     methodUpdate(timeElapsed, timeDelta)
@@ -107,14 +91,82 @@ export class EntityComponentPeerConnection extends EntityComponent
 
     methodGetLocalId(){return this.#localId;}
     methodGetIsOpen(){return this.#isOpen;}
+    methodGetConnectionIds(){return Array.from(this.#connections.keys());}
+    methodGetIsHostForId(peerId){return this.#connectionIsHost.get(peerId) === true;}
+
+    // Convenience aggregates over the map, for the current 2-player UI (see
+    // EntityComponentPeerConnectionUI) which only ever needs to reflect "the"
+    // one connection. Once mesh formation (MULTIPLAYER_TOPOLOGY_AND_SYNC.md)
+    // can produce more than one connection, showing per-connection state
+    // properly is a UI change of its own, not something these two need to
+    // solve - until then, "first" and "only" are the same connection.
+    methodGetIsConnected(){return this.#connections.size > 0;}
+    methodGetIsHost()
+    {
+        const firstId = this.#connections.keys().next().value;
+        if(firstId == null){return false;}
+        return this.methodGetIsHostForId(firstId);
+    }
 
     // actions
 
     methodConnectToRemoteId(remoteId)
     {
-        // TEMP: no real connection yet; see the commented-out real
-        // implementation above.
-        console.log("EntityComponentPeerConnection: would connect to remote id:", remoteId);
+        if(this.#peer == null){return;}
+        if(this.#connections.has(remoteId)){return;} // already connected
+        const conn = this.#peer.connect(remoteId);
+        // we typed someone else's code and initiated - we're the client
+        this.methodHandleConnection(conn, false);
+    }
+
+    methodSendToId(peerId, message)
+    {
+        const conn = this.#connections.get(peerId);
+        if(conn == null){return;}
+        conn.send(message);
+    }
+
+    methodSendToAll(message)
+    {
+        for(const conn of this.#connections.values())
+        {
+            conn.send(message);
+        }
+    }
+
+    // Drains and returns every message received since the last call, across
+    // all connections. Polled once per frame by consumers (rather than a
+    // registrable callback) to match this codebase's existing per-frame
+    // methodUpdate style.
+    methodDrainMessages()
+    {
+        const result = this.#pendingMessages;
+        this.#pendingMessages = [];
+        return result;
+    }
+
+    // internal helpers
+
+    methodGenerateShortId()
+    {
+        // short, human-typeable: 4 digits
+        return String(Math.floor(1000 + Math.random() * 9000));
+    }
+
+    methodHandleConnection(conn, isHost)
+    {
+        conn.on('open', () => {
+            console.log("EntityComponentPeerConnection: connected to", conn.peer);
+            this.#connections.set(conn.peer, conn);
+            this.#connectionIsHost.set(conn.peer, isHost);
+        });
+        conn.on('data', (data) => {
+            this.#pendingMessages.push({peerId: conn.peer, message: data});
+        });
+        conn.on('close', () => {
+            this.#connections.delete(conn.peer);
+            this.#connectionIsHost.delete(conn.peer);
+        });
     }
 }
 
@@ -140,6 +192,7 @@ export class EntityComponentPeerConnectionUI extends EntityComponent
     #elementLocalIdLabel = null;
     #elementRemoteIdInput = null;
     #elementConnectButton = null;
+    #elementConnectedCheckmark = null;
     #hasDisplayedCode = false;
 
     // construct
@@ -191,25 +244,45 @@ export class EntityComponentPeerConnectionUI extends EntityComponent
         this.#elementContainer.appendChild(this.#elementConnectButton);
 
         //
+        this.#elementConnectedCheckmark = document.createElement("span");
+        this.#elementConnectedCheckmark.innerText = "✓"; // checkmark
+        this.#elementConnectedCheckmark.style.color = "limegreen";
+        this.#elementConnectedCheckmark.style.fontSize = "16px";
+        this.#elementConnectedCheckmark.style.fontWeight = "bold";
+        this.#elementConnectedCheckmark.style.display = "none";
+        this.#elementContainer.appendChild(this.#elementConnectedCheckmark);
+
+        //
         document.body.appendChild(this.#elementContainer);
     }
 
     methodUpdate(timeElapsed, timeDelta)
     {
-        // early return: not mounted (native shell), or already displayed
+        // early return: not mounted (native shell)
         if(this.#elementLocalIdLabel == null){return;}
-        if(this.#hasDisplayedCode){return;}
 
         //
         const componentPeerConnection = this.methodGetComponent("EntityComponentPeerConnection");
         if(componentPeerConnection == null){return;}
 
         //
-        if(componentPeerConnection.methodGetIsOpen())
+        if(!this.#hasDisplayedCode && componentPeerConnection.methodGetIsOpen())
         {
             this.#elementLocalIdLabel.innerText = "your code: " + componentPeerConnection.methodGetLocalId();
             this.#hasDisplayedCode = true;
         }
+
+        // Once connected: hide the code-entry input/button, show a checkmark
+        // instead. The host (the one whose code was used to connect) keeps its
+        // own code visible; the client (the one who typed a code in) doesn't
+        // need to show its own code to anyone, so it's hidden.
+        const isConnected = componentPeerConnection.methodGetIsConnected();
+        const isHost = componentPeerConnection.methodGetIsHost();
+
+        this.#elementRemoteIdInput.style.display = isConnected ? "none" : "";
+        this.#elementConnectButton.style.display = isConnected ? "none" : "";
+        this.#elementConnectedCheckmark.style.display = isConnected ? "inline" : "none";
+        this.#elementLocalIdLabel.style.display = (isConnected && !isHost) ? "none" : "";
     }
 
     // handlers

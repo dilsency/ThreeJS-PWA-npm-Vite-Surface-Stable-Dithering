@@ -15,7 +15,7 @@ panel's fit needing to be hand-adjusted to match.
 
 ## Horizontal alignment
 
-`HUDCubeHorizontalAlignmentEnum` currently has two values:
+`HUDCubeHorizontalAlignmentEnum` has three values:
 
 - `CENTER` — cubeHUD sits horizontally centered, `x` offset `0`. The original,
   simplest case.
@@ -28,13 +28,11 @@ panel's fit needing to be hand-adjusted to match.
   roll option 3 below — see that comment thread in `computeCubeHUDLayout`
   directly, since (unlike the roll attempts) this fix is still live in the
   code, not reverted.
-
-A third value, `RIGHT` (mirroring `LEFT` for the screen's right edge), is
-planned but not implemented yet. When it's added, it needs:
-1. A new branch in `computeCubeHUDLayout` mirroring the `LEFT` iterative solve.
-2. Adding `HUDCubeHorizontalAlignmentEnum.RIGHT` to the enum.
-3. Adding it to `cubeHUDAlignmentCycle` in the tuning UI (see below) so the
-   cycle button includes it.
+- `RIGHT` — mirrors `LEFT` exactly, for the screen's right edge: same
+  iterative solve, same reasoning, just targeting NDC x = `+1` and searching
+  for the cube's rightmost (max NDC x) corner instead of leftmost. Verified
+  directly: the panel's right edge lands at NDC x ≈ `1.0` (pixel-exact at a
+  1280px viewport).
 
 `computeCubeHUDLayout(alignment)` is a function, not one-shot init code,
 specifically so alignment can be changed live (by the tuning UI's cycle
@@ -59,7 +57,12 @@ correction deliberately trades
 "parallel to camera" for "looks like it's facing the camera," which the user
 confirmed was an improvement (see below for what wasn't).
 
-**Roll (`rotation.z`)** — currently **not applied** (baseline `0`). Three
+**Roll (`rotation.z`)** — no automatic/geometric correction is computed for
+it (unlike yaw); see below for the three axis choices tried and rejected.
+The live tuning tool's roll *offset* input now defaults to preset "1"'s
+value (`8.5°`) at startup rather than `0` — see "Live tuning dev tool"
+below — but that's a chosen starting point for hand-tuning, not a computed
+correction the way yaw's is. Three
 different axis choices were tried, one at a time, each solved numerically to
 exactly level the cube's top-left/top-right corners on screen, and each was
 rejected as looking *worse* than yaw-only once actually seen running:
@@ -113,17 +116,19 @@ top-right of the viewport:
   `cubeHUD`'s rotation live, with zero latency, no reload. Each is an
   *offset* added on top of the existing base values
   (`cubeHUDTiltRadians`/`cubeHUDLayout.yawRadians`), not a replacement —
-  roll has no base to add to right now since it's reverted to `0`.
+  roll has no base to add to, since there's no computed roll correction (see
+  above).
 - **presets** — a plain array literal (`cubeHUDTuningPresets`) of
-  `{pitch, yaw, roll}` tuples found to look decent by eye, each rendered as a
-  numbered button that fills the three inputs and applies them immediately.
-  Current presets, in degrees (pitch, yaw, roll):
-  1. `(-15.5, -8.5, 8.5)`
-  2. `(-4.5, -8.5, -1)`
-  3. `(-18.5, -9, 10.5)`
-
-  Add more tuples to the array as more are found; no other code changes
-  needed.
+  `{pitch, yaw, roll, shearXY, shearXZ, shearYX, shearYZ, shearZX, shearZY}`
+  tuples found to look decent by eye, each rendered as a numbered button
+  (0-indexed, matching the array) that fills all nine inputs and applies them
+  immediately via a shared `applyPreset(preset)` helper. Preset `0` is a
+  deliberate all-zero reset. **Preset `1` is also applied once automatically
+  at startup** (`applyPreset(cubeHUDTuningPresets[1])`, retried each frame
+  via `requestAnimationFrame` until cubeHUD's mesh actually exists, since its
+  `methodInitialize()` is async) — it's the actual default look now, not a
+  first entry you have to click into. Add more tuples to the array as more
+  are found; no other code changes needed beyond that.
 - **shear (x per y) / (x per z) / (y per x) / (y per z) / (z per x) / (z per
   y)** — six number inputs, one per off-diagonal cell of a 3D shear matrix
   (see "Shear/skew" below for what these mean and why this shape of control).

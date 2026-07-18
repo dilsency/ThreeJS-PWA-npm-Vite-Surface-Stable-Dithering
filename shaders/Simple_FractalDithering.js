@@ -101,3 +101,14 @@ export async function createFractalMaterial(opts = {}) {
 export function createFractalMaterialFromSources(vertexSource, fragmentSource, opts = {}) {
   return buildMaterial(vertexSource, fragmentSource, opts);
 }
+
+// Fetches just the shader source text, without building a material - lets
+// callers that construct many materials from the same shader (every
+// EntityComponentTestCube instance) fetch once and reuse the same strings via
+// createFractalMaterialFromSources, instead of every instance re-fetching for
+// itself. See SHADER_SOURCE_AND_TEXTURE_CACHING.md.
+export async function loadFractalShaderSources() {
+  const vertexShader = await loadText(new URL('./Simple_FractalDithering.vert?raw', import.meta.url));
+  const fragmentShader = await loadText(new URL('./Simple_FractalDithering.frag?raw', import.meta.url));
+  return { vertexShader, fragmentShader };
+}
