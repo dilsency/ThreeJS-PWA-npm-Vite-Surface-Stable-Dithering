@@ -29,7 +29,8 @@ export class EntityComponentPeerConnection extends EntityComponent
     //
     #connections = new Map(); // peerId -> DataConnection
     #connectionIsHost = new Map(); // peerId -> boolean
-    #pendingMessages = []; // [{peerId, message}], drained by whoever consumes them (e.g. EntityComponentRemotePlayerManager)
+    #pendingMessages = []; // [{peerId, message}], written by conn.on('data', ...); moved into #messagesThisFrame once per frame by our own methodUpdate()
+    #messagesThisFrame = []; // this frame's batch - read non-destructively by any number of sibling components (see methodGetMessagesThisFrame())
 
     // construct
     constructor(params)
@@ -85,6 +86,21 @@ export class EntityComponentPeerConnection extends EntityComponent
 
     methodUpdate(timeElapsed, timeDelta)
     {
+        // Drained exactly once per frame, here - not by whichever sibling
+        // component happens to call a getter first. More than one sibling
+        // now needs to see the same incoming messages each frame
+        // (EntityComponentRemotePlayerManager for "identity"/"transform",
+        // EntityComponentPeerMeshFormation for "roster"), so this has to be
+        // a non-destructive snapshot they can all read, not a destructive
+        // pull - the old methodDrainMessages() was exactly that, and would
+        // have silently handed a whole frame's messages to whichever
+        // consumer called it first, leaving the other with nothing. Relies
+        // on this component being registered before its message-consuming
+        // siblings on the same entity (see main.js's "multiplayer" entity),
+        // since Entity.methodUpdate() runs components in registration
+        // order (Object.entries() preserves string-key insertion order).
+        this.#messagesThisFrame = this.#pendingMessages;
+        this.#pendingMessages = [];
     }
 
     // getters
@@ -134,15 +150,13 @@ export class EntityComponentPeerConnection extends EntityComponent
         }
     }
 
-    // Drains and returns every message received since the last call, across
-    // all connections. Polled once per frame by consumers (rather than a
-    // registrable callback) to match this codebase's existing per-frame
-    // methodUpdate style.
-    methodDrainMessages()
+    // Returns this frame's batch of received messages, across all
+    // connections - the same array for every caller this frame, safe for
+    // any number of sibling components to read (see methodUpdate() above
+    // for why this must be non-destructive).
+    methodGetMessagesThisFrame()
     {
-        const result = this.#pendingMessages;
-        this.#pendingMessages = [];
-        return result;
+        return this.#messagesThisFrame;
     }
 
     // internal helpers
@@ -182,6 +196,18 @@ export class EntityComponentPeerConnection extends EntityComponent
 // component must not mount its UI there at all - detected once at
 // methodInitialize() via the presence of a native bridge global, not toggled
 // via CSS on an otherwise-active component.
+//
+// The code-entry input/Connect button have their own collapse/expand toggle
+// (a `^` button collapses them; a `v` button, shown only while collapsed,
+// expands them again) - two separate, single-purpose buttons rather than one
+// button swapping its own label/handler, mirroring the cubeHUD tuning
+// panel's existing v/^ mechanic in main.js (see
+// MULTIPLAYER_TOPOLOGY_AND_SYNC.md's "Implementation plan: mesh formation,"
+// sub-step 7, for the full reasoning). The panel auto-collapses the moment
+// this player makes their first connection, but only once - after that it's
+// just a manual toggle, so more players can still be invited later by
+// expanding it again, rather than the old behavior of hiding the code-entry
+// UI for good the instant any connection existed.
 export class EntityComponentPeerConnectionUI extends EntityComponent
 {
     // bare minimum
@@ -192,8 +218,14 @@ export class EntityComponentPeerConnectionUI extends EntityComponent
     #elementLocalIdLabel = null;
     #elementRemoteIdInput = null;
     #elementConnectButton = null;
-    #elementConnectedCheckmark = null;
+    #elementCollapseButton = null;
+    #elementExpandButton = null;
+    #elementConnectionCountIndicator = null;
     #hasDisplayedCode = false;
+
+    //
+    #isExpanded = true; // default: input/button/^ visible, v hidden
+    #hasAutoCollapsedOnConnect = false;
 
     // construct
     constructor(params)
@@ -244,13 +276,27 @@ export class EntityComponentPeerConnectionUI extends EntityComponent
         this.#elementContainer.appendChild(this.#elementConnectButton);
 
         //
-        this.#elementConnectedCheckmark = document.createElement("span");
-        this.#elementConnectedCheckmark.innerText = "✓"; // checkmark
-        this.#elementConnectedCheckmark.style.color = "limegreen";
-        this.#elementConnectedCheckmark.style.fontSize = "16px";
-        this.#elementConnectedCheckmark.style.fontWeight = "bold";
-        this.#elementConnectedCheckmark.style.display = "none";
-        this.#elementContainer.appendChild(this.#elementConnectedCheckmark);
+        this.#elementCollapseButton = document.createElement("button");
+        this.#elementCollapseButton.textContent = "^";
+        this.#elementCollapseButton.style.marginLeft = "4px";
+        this.#elementCollapseButton.addEventListener("click", () => { this.#isExpanded = false; });
+        this.#elementContainer.appendChild(this.#elementCollapseButton);
+
+        //
+        this.#elementExpandButton = document.createElement("button");
+        this.#elementExpandButton.textContent = "v";
+        this.#elementExpandButton.style.display = "none"; // starts expanded, so nothing to expand from yet
+        this.#elementExpandButton.addEventListener("click", () => { this.#isExpanded = true; });
+        this.#elementContainer.appendChild(this.#elementExpandButton);
+
+        //
+        this.#elementConnectionCountIndicator = document.createElement("span");
+        this.#elementConnectionCountIndicator.style.color = "limegreen";
+        this.#elementConnectionCountIndicator.style.fontSize = "16px";
+        this.#elementConnectionCountIndicator.style.fontWeight = "bold";
+        this.#elementConnectionCountIndicator.style.marginLeft = "4px";
+        this.#elementConnectionCountIndicator.style.display = "none";
+        this.#elementContainer.appendChild(this.#elementConnectionCountIndicator);
 
         //
         document.body.appendChild(this.#elementContainer);
@@ -272,16 +318,44 @@ export class EntityComponentPeerConnectionUI extends EntityComponent
             this.#hasDisplayedCode = true;
         }
 
-        // Once connected: hide the code-entry input/button, show a checkmark
-        // instead. The host (the one whose code was used to connect) keeps its
-        // own code visible; the client (the one who typed a code in) doesn't
-        // need to show its own code to anyone, so it's hidden.
-        const isConnected = componentPeerConnection.methodGetIsConnected();
+        //
+        const connectionCount = componentPeerConnection.methodGetConnectionIds().length;
+        const isConnected = connectionCount > 0;
         const isHost = componentPeerConnection.methodGetIsHost();
 
-        this.#elementRemoteIdInput.style.display = isConnected ? "none" : "";
-        this.#elementConnectButton.style.display = isConnected ? "none" : "";
-        this.#elementConnectedCheckmark.style.display = isConnected ? "inline" : "none";
+        // Auto-collapse the join UI the first time this player connects to
+        // anyone - once, not every frame, so a manual re-expand afterward
+        // (to invite more players) isn't immediately fought and snapped back
+        // shut on the very next frame.
+        if(isConnected && !this.#hasAutoCollapsedOnConnect)
+        {
+            this.#isExpanded = false;
+            this.#hasAutoCollapsedOnConnect = true;
+        }
+
+        this.#elementRemoteIdInput.style.display = this.#isExpanded ? "" : "none";
+        this.#elementConnectButton.style.display = this.#isExpanded ? "" : "none";
+        this.#elementCollapseButton.style.display = this.#isExpanded ? "" : "none";
+        this.#elementExpandButton.style.display = this.#isExpanded ? "none" : "";
+
+        // Connection-count indicator: independent of expand/collapse state
+        // (same as the checkmark it replaces, which was always shown once
+        // connected regardless of anything else) - a circled-digit character
+        // (①, ②, ③, ...) matching the current connection count, re-evaluated
+        // every frame so it updates live as players join or leave, unlike the
+        // old checkmark's fixed two-state flip. Unicode U+2460 upward is
+        // consecutive per digit, so this covers 1-10 with no lookup table;
+        // clamped defensively even though this project's target is ~6 players.
+        if(isConnected)
+        {
+            const clampedCount = Math.min(connectionCount, 10);
+            this.#elementConnectionCountIndicator.textContent = String.fromCodePoint(0x2460 + clampedCount - 1);
+        }
+        this.#elementConnectionCountIndicator.style.display = isConnected ? "inline" : "none";
+
+        // The host (the one whose code was used to connect) keeps its own
+        // code visible; the client (the one who typed a code in) doesn't need
+        // to show its own code to anyone, so it's hidden.
         this.#elementLocalIdLabel.style.display = (isConnected && !isHost) ? "none" : "";
     }
 

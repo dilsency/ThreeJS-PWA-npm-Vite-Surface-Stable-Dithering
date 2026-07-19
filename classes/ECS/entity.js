@@ -140,7 +140,7 @@ export class Entity
     {
         this.#position.copy(paramPosition);
             // supposedly this lets us trickle down our position to each entity_component that needs it
-        this.methodBroadcastMessage({
+        this.methodSendMessageWithinEntity({
             invokableHandlerName: 'update.position',
             invokableHandlerValue: this.#position,
         });
@@ -148,7 +148,7 @@ export class Entity
     methodSetRotation(paramRotation){
         this.#rotationA.copy(paramRotation);
             // supposedly this lets us trickle down our rotation to each entity_component that needs it
-        this.methodBroadcastMessage({
+        this.methodSendMessageWithinEntity({
             invokableHandlerName: 'update.rotation',
             invokableHandlerValue: this.#rotationA,
         });
@@ -157,7 +157,7 @@ export class Entity
         this.#rotationA.copy(paramRotationA);
         this.#rotationB.copy(paramRotationB);
             // supposedly this lets us trickle down our rotation to each entity_component that needs it
-        this.methodBroadcastMessage({
+        this.methodSendMessageWithinEntity({
             invokableHandlerName: 'update.rotations',
             invokableHandlerValue: {rotationA: this.#rotationA, rotationADelta: paramRotationADelta, rotationB: this.#rotationB, rotationBDelta: paramRotationBDelta},
         });
@@ -213,7 +213,7 @@ export class Entity
 
     // registers
 
-    methodRegisterInvokableHandler(paramInvokableHandlerName, paramInvokableHandlerValue)
+    methodRegisterMessageHandlerWithinEntity(paramInvokableHandlerName, paramInvokableHandlerValue)
     {
         //console.log("register invokable handler!");
         console.log("register " + paramInvokableHandlerName);
@@ -262,7 +262,7 @@ export class Entity
 
     // ...
 
-    methodBroadcastMessage(paramMessage)
+    methodSendMessageWithinEntity(paramMessage)
     {
         // early return: we need to have a handler that matches message
         const weHaveAnInvokableHandlerThatMatchesMessage = (paramMessage.invokableHandlerName in this.#invokableHandlers);
@@ -287,6 +287,19 @@ export class Entity
             // though it kind of makes sense in this moment
 
             iteratorInvokableHandlerInvoke(paramMessage);
+        }
+    }
+
+    methodSendMessageToEntitiesWithComponent(paramComponentName, paramMessage, paramEntityNameToExclude)
+    {
+        // convenience/shorthand, not new capability:
+        // methodGetEntitiesWithComponent already returns real Entity references,
+        // and methodSendMessageWithinEntity is a plain public method on Entity,
+        // so this is just those two combined via a loop
+        const entitiesWithComponent = this.methodGetEntitiesWithComponent(paramComponentName, paramEntityNameToExclude);
+        for(const iteratorEntity of entitiesWithComponent)
+        {
+            iteratorEntity.methodSendMessageWithinEntity(paramMessage);
         }
     }
 }

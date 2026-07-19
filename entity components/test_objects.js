@@ -156,7 +156,7 @@ export class EntityComponentTestCube extends EntityComponent
             this.#cube.position.y += this.#positionOffset.y;
             this.#cube.position.z += this.#positionOffset.z;
 
-            this.methodRegisterInvokableHandler('update.position', (paramMessage) =>{ this.methodHandleUpdatePosition(paramMessage); });
+            this.methodRegisterMessageHandlerWithinEntity('update.position', (paramMessage) =>{ this.methodHandleUpdatePosition(paramMessage); });
 
     }
 
@@ -314,7 +314,7 @@ export class EntityComponentBackgroundPlane extends EntityComponent
         this.#plane.position.y += this.#positionOffset.y;
         this.#plane.position.z += this.#positionOffset.z;
 
-        this.methodRegisterInvokableHandler('update.position', (paramMessage) => { this.methodHandleUpdatePosition(paramMessage); });
+        this.methodRegisterMessageHandlerWithinEntity('update.position', (paramMessage) => { this.methodHandleUpdatePosition(paramMessage); });
     }
 
     methodUpdate(timeElapsed, timeDelta)

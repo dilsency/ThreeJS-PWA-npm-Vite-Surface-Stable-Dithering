@@ -19,8 +19,8 @@ rule for what should happen to this code going forward.
 2. **It doesn't fit the ECS shape functionally.** `EntityComponent` exists for
    things with a per-frame `methodUpdate(timeElapsed, timeDelta)` and/or a
    position/rotation in the scene graph that other components need to look up
-   via `methodGetComponent` or react to via broadcast messages
-   (`methodRegisterInvokableHandler`). The tuning panel has neither: it's pure
+   via `methodGetComponent` or react to via messages sent within the entity
+   (`methodRegisterMessageHandlerWithinEntity`). The tuning panel has neither: it's pure
    event-driven DOM (`input`/`click` listeners), fires zero logic per frame,
    and has no position of its own — it's a UI overlay, not a scene entity.
 3. **It reaches into other components' internals directly, by design, because
@@ -68,8 +68,8 @@ should declare and own its own state — private fields, constructor `params`,
 `methodGetX`/`methodSetX` accessors — not read a variable that merely happens
 to be sitting in `initEntityComponents()`'s scope. Cross-component
 communication belongs in the ECS's actual mechanisms: `methodGetComponent`
-sibling lookups and `methodRegisterInvokableHandler`/`methodBroadcastMessage`,
-not shared locals threaded through closures.
+sibling lookups and `methodRegisterMessageHandlerWithinEntity`/
+`methodSendMessageWithinEntity`, not shared locals threaded through closures.
 
 **If a variable is needed by more than one entity component, that's a
 signal, not a shortcut to take.** It means that value's ownership belongs in

@@ -75,11 +75,16 @@ export class EntityComponentPlayerNetworkSync extends EntityComponent
 
         //
         const position = componentCamera.methodGetPosition();
+        const cameraPivotQuaternion = componentCamera.methodGetCameraPivotQuaternion();
+        const cameraQuaternion = componentCamera.methodGetCameraQuaternion();
         componentPeerConnection.methodSendToAll({
             type: "transform",
             position: {x: position.x, y: position.y, z: position.z},
-            yaw: componentCamera.methodGetYaw(),
-            pitch: componentCamera.methodGetPitch(),
+            // Both quaternions, not a derived yaw/pitch - see
+            // EntityComponentCameraControllerFirstPerson.methodGetCameraPivotQuaternion()/
+            // methodGetCameraQuaternion() for why.
+            cameraPivotQuaternion: {x: cameraPivotQuaternion.x, y: cameraPivotQuaternion.y, z: cameraPivotQuaternion.z, w: cameraPivotQuaternion.w},
+            cameraQuaternion: {x: cameraQuaternion.x, y: cameraQuaternion.y, z: cameraQuaternion.z, w: cameraQuaternion.w},
         });
     }
 }

@@ -10,12 +10,94 @@ remote player as a placeholder cube in every *other* player's scene, and
 continuously syncing position/facing-direction between everyone.
 
 Implementation status, updated as each step lands: the connection-transport
-generalization (single connection → `Map<peerId, DataConnection>`) and remote
+generalization (single connection → `Map<peerId, DataConnection>`), remote
 cube spawn/sync/despawn (`EntityComponentPlayerNetworkSync` +
-`EntityComponentRemotePlayerManager`) are both implemented and verified for
-the 2-player case. Mesh formation (`EntityComponentPeerMeshFormation`,
-scaling past 2 players) is still design-only — see "Entity component
-breakdown" and "Status" below for the precise line.
+`EntityComponentRemotePlayerManager`), mesh formation past 2 players
+(`EntityComponentPeerMeshFormation`), `EntityComponentPeerConnectionUI`'s
+live connection-count indicator + collapse/expand UI, and interpolating
+remote players' position/rotation between throttled `transform` updates so
+they don't visually snap (`TODO.md` item 7 — the interpolation math itself
+is written up in `MATH_TRICKS.md`) are all implemented — see "Entity
+component breakdown" and "Status" below for exactly what's been tested.
+
+## Glossary
+
+Terms as used specifically in this doc/project — not general networking
+definitions. Alphabetical.
+
+- **Convergence** — the point at which every player in a session has
+  finished discovering and connecting to every other player, so the group's
+  connections form a complete peer mesh. Mesh formation (below) is the
+  process that drives a group toward convergence as players join; a
+  "convergence gap" (see "Mesh formation") is a bug where some pair of
+  players never ends up connected at all.
+- **`DataConnection`** — PeerJS's object representing one actual WebRTC
+  peer-to-peer data channel to a specific other peer. `EntityComponentPeerConnection`
+  holds these in a `Map<peerId, DataConnection>`, one per connected player.
+  Not the same thing as a *peer* (a player) — one player, once connected to
+  several others, holds several `DataConnection`s, one per peer.
+- **Full mesh** — see **Peer mesh**.
+- **Host / Client (per-connection roles)** — *not* a topology (this project
+  is always a peer mesh, never host-relay) — a label for which side of one
+  specific connection shared the one-time code (host) versus typed someone
+  else's (client). Purely about how that one connection came to exist;
+  doesn't imply anything about authority, relaying, or centralization, and a
+  single player is simultaneously "host" for some of their connections and
+  "client" for others once more than 2 players are involved.
+- **Host-relay (star)** — the rejected alternative topology: every player
+  connects only to one designated host, who relays messages between
+  clients that aren't talking to it directly. See "Topology: full mesh vs.
+  host-relay" for why this project chose peer mesh instead.
+- **Identity (message)** — the `{type: "identity", shapeIndex, colorIndex1,
+  colorIndex2}` message. A player's chosen cubeHUD shape/colors, sent once
+  per connection (never repeats, since it never changes for that
+  connection's lifetime) so the receiving player can skin that peer's
+  remote-representation cube correctly. See "Message envelope, identity,
+  and transform sync."
+- **Mesh formation** — the roster-handshake protocol
+  (`EntityComponentPeerMeshFormation`) that grows a player's one initial
+  connection (from typing/sharing a one-time code) into a full peer mesh
+  with everyone else already in the session, without needing every pair of
+  players to manually exchange codes with each other. See "Mesh formation:
+  how a new player learns about everyone."
+- **Message envelope** — the shared `{type: "...", ...}` wrapper shape every
+  message sent over any `DataConnection` uses, regardless of which concern
+  (`roster`, `identity`, `transform`) it carries — one shape, so a new
+  message kind never needs its own transport mechanism.
+- **Peer mesh (full mesh)** — the topology this project uses: every player
+  holds a direct `DataConnection` to every other player, with no relay and
+  no central/privileged node. At *N* players that's `N*(N-1)/2` total
+  connections, `N-1` per player. See "Topology: full mesh vs. host-relay."
+- **Per-frame message snapshot** — `EntityComponentPeerConnection.methodGetMessagesThisFrame()`'s
+  return value: every message received since the last frame, across all
+  connections, as one array that any number of sibling components can read
+  the *same* copy of that frame (non-destructively) — as opposed to a
+  destructive drain, which only the first reader each frame would actually
+  see anything from. See "Entity component breakdown."
+- **Roster** — the `{type: "roster", peerIds: [...]}` message: one player's
+  current list of who they're already connected to, sent to converge the
+  mesh (see **Mesh formation**). Re-broadcast to every current connection
+  whenever the sender's own connection set changes — *not* sent only once
+  to a newcomer, which was tried first and found to leave convergence gaps
+  (see "Mesh formation" for the actual bug this caused).
+- **Signaling** — the WebRTC handshake (SDP offer/answer + ICE candidates)
+  that has to pass between two browsers before their direct
+  `DataConnection` can exist at all. Handled entirely by PeerJS's public
+  broker in this project (see `LAN_MULTIPLAYER_CONSIDERATIONS.md`) — once
+  signaling completes, all further traffic (roster/identity/transform)
+  flows peer-to-peer, not through that broker.
+- **Tie-breaker** — the rule deciding which of two peers is allowed to
+  initiate a new connection when both independently discover, from a
+  `roster` message, that they need to connect to each other at roughly the
+  same time. Decided as: only the peer with the numerically **smaller** id
+  initiates; the other side waits to receive. Prevents a duplicate
+  `DataConnection` forming for the same pair; has no effect on anything
+  else, since who dials first doesn't change the mesh's end state.
+- **Transform (message)** — the `{type: "transform", position, cameraPivotQuaternion,
+  cameraQuaternion}` message: a player's current position and facing
+  direction, sent continuously at a throttled rate (~18Hz) for as long as a
+  connection is open, unlike `identity`, which is sent once. See "Message
+  envelope, identity, and transform sync."
 
 ## Topology: full mesh vs. host-relay
 
@@ -87,38 +169,50 @@ of player count. Given this project has consistently chosen "no privileged
 central node" at every prior networking decision, mesh is the consistent
 choice here too, not just the theoretically nicer one.
 
-## Mesh formation: how a new player learns about everyone
+## Mesh formation: how a new player learns about everyone (implemented)
 
 The existing one-time-code UI is unchanged as the entry point — you still
-connect to exactly one specific peer to join. What has to be added is a
-handshake that runs the moment any `DataConnection` opens (on **both**
-sides, regardless of which side is the "host" for that particular
-connection — see `EntityComponentPeerConnection`'s existing host/client
-distinction, which stays meaningful per-connection even once there are
-several):
+connect to exactly one specific peer to join. `EntityComponentPeerMeshFormation`
+(`entity components/peer_mesh_formation.js`, living alongside
+`EntityComponentPeerConnection` on the "multiplayer" entity) handles the
+rest:
 
-1. Each side immediately sends `{type: "roster", peerIds: [...]}` — the
-   list of every peer id it currently holds an open connection to (not
-   including the recipient, who obviously already knows about this
-   connection).
+1. Whenever a peer's own connection set changes — a connection opens *or*
+   closes — it re-broadcasts `{type: "roster", peerIds: [...]}` to **every**
+   currently-connected peer, not just to whichever one just joined. Compared
+   against the last-broadcast set each frame so it's a no-op once the mesh
+   is stable, not a resend-every-frame cost.
 2. On receiving a `roster` message, for every id in the list that isn't
-   already an open (or in-progress) connection and isn't the receiver's own
-   id, initiate `peer.connect(id)` to it.
-3. This converges the whole group to full mesh within a couple of hops as
-   each new connection triggers its own roster exchange — a player joining
-   an existing 5-person session doesn't need to be told about all 5 in one
-   message from one source; discovering 2 of them directly and the
-   remaining 3 transitively (via those 2's own roster messages) reaches the
-   same end state.
+   already an open connection and isn't the receiver's own id, initiate
+   `peer.connect(id)` — subject to the tie-breaker below.
+3. This converges the whole group to full mesh, since every peer keeps
+   re-announcing its own growing connection set to everyone it already
+   knows, rather than only informing each peer once at the moment it joins.
 
-**A real correctness issue worth flagging, not glossing over:** two peers
-who each discover the other from a roster message at roughly the same time
-could both call `peer.connect()` on each other simultaneously, opening two
-separate `DataConnection`s for the same pair. The mesh-formation logic needs
-a tie-breaker before actually implementing this — e.g. only the
-lexicographically (or numerically) smaller peer id is allowed to initiate a
-new connection; the other side just waits to receive one. Noted here so
-it's not rediscovered the hard way mid-implementation.
+**Why "once per newcomer" isn't enough — a real bug this project actually
+hit, not a hypothetical:** the first implementation sent `roster` exactly
+once, to each connection, the moment *that* connection opened. A stress
+test — 5 tabs all connecting to the same hub within milliseconds of each
+other — showed several pairs never discovering each other at all (not a
+duplicate-connection race; a convergence gap). Cause: a peer that connected
+to the hub *early* received its one-and-only roster message before the hub
+had also connected to peers that joined a moment *later* — that snapshot
+was permanently stale, and since nothing ever re-sent it, the early peer
+never learned about the later ones. Re-broadcasting to *all* current
+connections on every change (not just to the newcomer) closes this
+completely: verified with the same 5-tab stress scenario across three
+repeated runs, all converging to a full mesh every time.
+
+**The tie-breaker (a separate, real correctness issue, decided up
+front):** two peers who each discover the other from a `roster` message at
+roughly the same time could both call `peer.connect()` on each other
+simultaneously, opening two separate `DataConnection`s for the same pair.
+Fixed by only letting the peer with the numerically **smaller** id
+initiate; the larger id just waits to receive. Which side "wins" has no
+lasting effect on the session — once the mesh converges, everyone ends up
+directly connected to everyone regardless of who dialed first — so this is
+purely about avoiding a duplicate connection, not a decision that matters
+otherwise.
 
 ## Message envelope, identity, and transform sync
 
@@ -147,12 +241,21 @@ its own payload shape. Known types so far:
   `EntityComponentRemotePlayerManager` defers actually creating the remote
   cube until this arrives, since a cube's shape/colors are fixed at
   construction and can't be changed after the fact.
-- `{type: "transform", position: {x, y, z}, yaw, pitch}` — a remote player's
-  current position and facing direction, in radians. Only yaw and pitch, no
-  roll, since that's all the local player's own controllers
-  (`EntityComponentPlayerController` / `EntityComponentCameraControllerFirstPerson`)
-  track for facing direction in the first place — there's nothing to send
-  that isn't already being computed.
+- `{type: "transform", position: {x, y, z}, cameraPivotQuaternion: {x,y,z,w},
+  cameraQuaternion: {x,y,z,w}}` — a remote player's current position and
+  facing direction. Originally sent as derived `yaw`/`pitch` scalars, which
+  only worked because `cameraPivot` currently only ever rotates on Y and
+  `camera` (its child) only ever rotates on X — extracting each object's own
+  Euler component happened to fully capture the composition, but would
+  silently break if that constraint ever loosened (e.g. roll added to
+  either object). Switched to sending each object's actual `quaternion`
+  instead: `EntityComponentRemotePlayerManager` composes them the same way
+  the real rig produces its final view direction
+  (`cube.quaternion.set(...cameraPivotQuaternion).multiply(new
+  THREE.Quaternion(...cameraQuaternion))`, parent then child), so the remote
+  cube's orientation stays correct regardless of how the local rig's
+  rotation logic evolves. Cost: 8 floats instead of 2, not a concern for LAN
+  bandwidth at ~6 players.
 
 **Send rate:** throttle outbound `transform` messages to roughly 15–20/sec
 per connection rather than once per render frame. LAN bandwidth isn't the
@@ -160,11 +263,12 @@ constraint here, but there's no reason to saturate every connection at 60Hz
 either — this is a starting point to tune once actually measured, not a
 hard commitment.
 
-**Not tackled yet, and deliberately deferred:** interpolating/smoothing a
-remote player's cube between received `transform` updates so it doesn't
-visually snap at whatever the send rate ends up being. Real polish item,
-but doesn't block getting position/rotation sync working at all, so it's
-left for a follow-up pass rather than bundled into this design.
+**Interpolation/smoothing** of a remote player's cube between received
+`transform` updates, so it doesn't visually snap at whatever the send rate
+ends up being, was deliberately deferred out of this original design (real
+polish item, didn't block getting position/rotation sync working at all) —
+now implemented, see `TODO.md` item 7 and `MATH_TRICKS.md`'s "Interpolation
+alpha" section for the full design.
 
 ## Entity component breakdown
 
@@ -183,34 +287,52 @@ spawning, transform routing), which is exactly that signal.
   `Map<peerId, DataConnection>` plus each connection's host/client role
   keyed by peer id, `methodGetConnectionIds()`, `methodGetIsHostForId(peerId)`,
   `methodSendToId(peerId, message)`, `methodSendToAll(message)`, and
-  `methodDrainMessages()` (a per-frame-polled inbox rather than a registrable
-  callback — see below). Still knows nothing about rosters, cubes, or what a
-  `transform` message means — purely "here are my open pipes." Also owns a
-  `beforeunload` handler that destroys the local `Peer` on tab close/navigate
-  — see "Disconnect detection" below for why that turned out to matter.
-- **`EntityComponentPeerConnectionUI`** (existing — unchanged in shape).
-  Still just the code-entry/checkmark DOM described in
+  `methodGetMessagesThisFrame()` — a **non-destructive** per-frame snapshot
+  of received messages (moved into place once per frame by this component's
+  own `methodUpdate()`), not a registrable callback, and not a destructive
+  drain either — an earlier `methodDrainMessages()` was destructive (first
+  caller each frame got everything, the next got nothing), which silently
+  broke the moment a second sibling
+  (`EntityComponentPeerMeshFormation`, needing `roster` messages) needed to
+  read the same incoming batch that `EntityComponentRemotePlayerManager`
+  already consumed for `identity`/`transform`. Still knows nothing about
+  rosters, cubes, or what a `transform` message means — purely "here are my
+  open pipes." Also owns a `beforeunload` handler that destroys the local
+  `Peer` on tab close/navigate — see "Disconnect detection" below for why
+  that turned out to matter.
+- **`EntityComponentPeerConnectionUI`** (existing — unchanged in shape so
+  far). Still just the code-entry/checkmark DOM described in
   `LAN_MULTIPLAYER_CONSIDERATIONS.md`, reading from
   `EntityComponentPeerConnection` via the normal sibling lookup. Showing
-  more than one connection's state (multiple checkmarks) is a real gap once
-  there are >2 players, but it's a UI-only follow-up on top of already
-  having per-connection data available — not something to solve as part of
-  this design.
-- **`EntityComponentPeerMeshFormation`** (not yet implemented). Owns the roster handshake
-  described above: sends a `roster` message when a connection opens,
-  handles incoming `roster` messages, and issues new `peer.connect()` calls
-  (through `EntityComponentPeerConnection`, via sibling lookup) for ids it
-  doesn't recognize yet. This is policy about *which connections should
-  exist*, deliberately kept separate from `EntityComponentPeerConnection`'s
-  job of *managing whatever connections already exist*.
+  more than one connection's state (a live connection-count indicator
+  instead of a static checkmark, plus a collapse/expand toggle for the
+  code-entry UI) is planned — see "Implementation plan: mesh formation"
+  below, sub-step 7 — but not yet built.
+- **`EntityComponentPeerMeshFormation`** (implemented). Owns the roster
+  handshake described above: re-broadcasts `{type: "roster", peerIds}` to
+  every current connection whenever its own connection set changes, handles
+  incoming `roster` messages, and issues new `peer.connect()` calls (through
+  `EntityComponentPeerConnection`, via sibling lookup) for ids it doesn't
+  recognize yet — subject to the numerically-smaller-id tie-breaker. This is
+  policy about *which connections should exist*, deliberately kept separate
+  from `EntityComponentPeerConnection`'s job of *managing whatever
+  connections already exist*. Registered before
+  `EntityComponentRemotePlayerManager` on the "multiplayer" entity in
+  `main.js` — harmless either way for this pair specifically, since both
+  only *read* `EntityComponentPeerConnection`'s per-frame snapshot, but it's
+  `EntityComponentPeerConnection` itself that must run first (registered
+  first), so its own `methodUpdate()` populates that snapshot before either
+  sibling reads it that frame.
 - **`EntityComponentRemotePlayerManager`** (implemented). Owns
   `Map<peerId, Entity>` for remote players. Each frame, reconciles that map
   against `EntityComponentPeerConnection.methodGetConnectionIds()` to
   spawn/despawn a bare `Entity` per peer (despawning also removes any cube
   mesh from `scene` and the entity from `EntityManager` —
   `EntityManager.methodRemoveEntity()` didn't exist before this and was added
-  for it), and drains `EntityComponentPeerConnection.methodDrainMessages()` to
-  handle two message types: `identity` attaches the entity's
+  for it), and reads `EntityComponentPeerConnection.methodGetMessagesThisFrame()`
+  (non-destructively, alongside `EntityComponentPeerMeshFormation`'s own read
+  of the same batch) to handle two message types: `identity` attaches the
+  entity's
   `EntityComponentTestCube` for the first time, using the received
   `shapeIndex` directly and resolving `colorIndex1`/`colorIndex2` via its own
   `colorPaletteBody`/`colorPaletteDither` constructor params (the same two
@@ -230,9 +352,10 @@ spawning, transform routing), which is exactly that signal.
   constructor params, set from `main.js`'s local-identity rolls) to each
   connection exactly once, tracked via a `#identitySentToIds` Set checked
   every frame; and reads the local player's current position/facing from its
-  sibling `EntityComponentCameraControllerFirstPerson` (which gained
-  `methodGetPosition()`/`methodGetYaw()`/`methodGetPitch()` for this) to send
-  `transform` messages to every open connection (via
+  sibling `EntityComponentCameraControllerFirstPerson` (which exposes
+  `methodGetPosition()`/`methodGetCameraPivotQuaternion()`/
+  `methodGetCameraQuaternion()` for this) to send `transform` messages to
+  every open connection (via
   `EntityComponentPeerConnection.methodSendToAll`) at the throttled rate
   (~18Hz, via a `#secondsSinceLastSend` accumulator against
   `EntityManager`'s per-frame `timeDelta`, which is in seconds). The one
@@ -243,6 +366,113 @@ Four components, four separable concerns — transport, mesh-formation
 policy, remote representation, and outbound broadcasting — each readable and
 testable on its own, matching how the camera/player controller split already
 works in this codebase.
+
+## Peer mesh roster messages: performance concerns
+
+Worth writing down precisely, since it's easy to assume "one more thing
+checked every frame" is a new cost category when it isn't.
+
+**How messages are checked — before mesh formation.** Already a per-frame
+poll, not something mesh formation introduced. `EntityComponentRemotePlayerManager.methodUpdate()`
+has always run once per frame (the ECS calls every component's
+`methodUpdate()` every frame, unconditionally — same as the player
+controller checking keys every frame, or the camera controller checking
+mouse movement every frame; nothing in this engine is purely event-driven).
+The one part that *is* genuinely event-driven, both before and after, is
+the WebRTC layer itself: PeerJS's `conn.on('data', ...)` callback fires the
+instant a message actually arrives and pushes it onto a queue
+(`#pendingMessages`) — but *consuming* that queue has always been a
+per-frame check for "anything new since last frame," never an immediate
+on-arrival handler.
+
+**How messages are checked — after mesh formation.** The only actual
+change: there are now **two** per-frame consumers instead of one —
+`EntityComponentRemotePlayerManager` (still checking for `identity`/
+`transform`) and `EntityComponentPeerMeshFormation` (checking for
+`roster`). Both are the same kind of check as before, just duplicated
+across one more component.
+
+**How messages are consumed — before mesh formation.** `EntityComponentPeerConnection.methodDrainMessages()`
+(now removed) was destructive: it returned the pending messages and
+cleared the buffer in the same call. Safe at the time, since exactly one
+consumer ever called it.
+
+**How messages are consumed — after mesh formation.** Had to change,
+not just duplicate: with two consumers reading in the same frame, a
+destructive drain would hand the whole frame's messages to whichever
+component's `methodUpdate()` happened to run first and leave the other
+with nothing (see "Entity component breakdown" above). Replaced with
+`methodGetMessagesThisFrame()` — a **non-destructive** snapshot,
+moved into place once per frame by `EntityComponentPeerConnection`'s own
+`methodUpdate()`, that any number of siblings can read the same copy of.
+
+**Performance cost — before and after: trivial, for the same reason both
+times.** Every operation involved is `O(number of connections)`, and this
+project's ceiling is ~6 players (5 connections per peer, at most). Concretely,
+per frame: `methodGetConnectionIds()` allocates one small array from a
+`Map`'s keys; `EntityComponentPeerMeshFormation` sorts it and compares it
+against the last-known set (via `JSON.stringify` on an array of at most 5
+short strings) to decide whether anything changed; both consumers loop over
+a messages array that, most frames, is empty (`transform` sends at a
+throttled ~18Hz against a ~60fps frame rate, so most frames carry zero new
+messages per connection, and `roster`/`identity` are one-shot events, not
+continuous). None of this changed in kind when mesh formation was added —
+only the count of components doing this exact same class of cheap check
+went from one to two, and swapping a destructive drain for a reference-copy
+snapshot doesn't add a new complexity class either (still `O(1)` for the
+handoff itself). This is the same order of cost as everything else already
+running every frame in this engine — not something that would ever show up
+as a measurable difference.
+
+## Concern? Reading the same message on subsequent frame(s)
+
+A natural question once messages are read from a per-frame snapshot instead
+of a destructive drain: what stops a component from reading the *same*
+message again on the next frame? And if it somehow did, would that actually
+matter?
+
+**What actually prevents it.** `EntityComponentPeerConnection.methodUpdate()`:
+
+```js
+this.#messagesThisFrame = this.#pendingMessages;
+this.#pendingMessages = [];
+```
+
+This **replaces** the reference every frame rather than merging into it.
+A given message exists in exactly one frame's snapshot: once frame *N+1*
+arrives, `#messagesThisFrame` points at a brand-new array (usually empty),
+and the array holding frame *N*'s messages is gone — unreachable, garbage.
+Consumers don't cache it either: `EntityComponentRemotePlayerManager` and
+`EntityComponentPeerMeshFormation` both call `methodGetMessagesThisFrame()`
+fresh, inside their own `methodUpdate()`, every frame — so they only ever
+see whatever is current *that* frame. This isn't a "mark as seen" scheme;
+it's simpler than that. Old data is structurally gone by the next frame,
+not tracked and skipped.
+
+**Would a double-read actually be harmless, if it somehow happened
+anyway?** Depends on the message type — not all three are equally safe, and
+it's worth being honest about that rather than assuming uniform safety:
+
+- **`identity`** — harmless. `methodApplyIdentity` already explicitly
+  guards against reapplying: it checks whether the entity already has its
+  `EntityComponentTestCube` attached and returns early if so.
+- **`transform`** — harmless. Setting the same position/quaternion values
+  twice in a row has no different effect than setting them once; there's no
+  accumulation, only assignment.
+- **`roster`** — **not actually safe**. `methodConnectToRemoteId`'s dedupe
+  check only looks at `EntityComponentPeerConnection`'s `#connections` map,
+  which is populated once a connection's `'open'` event fires — not the
+  moment `peer.connect()` is called. Processing the same roster entry twice
+  *before* the first connection attempt has finished opening would call
+  `peer.connect()` a second time, creating two separate `DataConnection`s to
+  the same peer — the same category of bug the tie-breaker (see "Mesh
+  formation" above) exists to prevent, just triggered by local
+  double-processing instead of two peers racing each other to connect.
+
+This gap is currently unexercised — the replace-not-merge mechanism above
+means it can't actually occur today — but it's a real asymmetry worth
+knowing about rather than assuming all three message types would tolerate a
+double-read equally well if the snapshot mechanism were ever changed again.
 
 ## Disconnect detection: PeerJS's `close` event, the `beforeunload` fix, and a Playwright gotcha
 
@@ -335,15 +565,138 @@ axes are independent random draws over the same ~20x20 footprint, unlike the
 near-zero chance of an exact collision), and there's no minimum-separation
 guarantee between players - not addressed here, since it wasn't asked for.
 
+## Implementation plan: mesh formation (TODO.md item #2)
+
+Written up before starting, per this project's usual design-before-code
+habit. **Sub-steps 1-6 are done** (tie-breaker decided and implemented,
+`EntityComponentPeerMeshFormation` built and wired in, all three test
+stages passed — see each sub-step below for what was actually verified).
+**Sub-step 7 (checkmark → connection-count indicator + collapse/expand UI)
+is not yet implemented.**
+
+1. **Settle the tie-breaker before writing any connect logic.** Two peers
+   that each discover the other from the same `roster` message at roughly
+   the same time could both call `peer.connect()` simultaneously, opening a
+   duplicate connection for that pair — see "Mesh formation" above. Decided:
+   only the peer with the numerically **smaller** id is allowed to initiate
+   a new connection when both sides independently decide they need to
+   connect to each other; the larger id just waits to receive the incoming
+   `DataConnection`. Which side "wins" is arbitrary and doesn't matter for
+   anything else — once mesh formation converges, every player ends up with
+   their own direct connection to every other player regardless of who
+   happened to dial first, so this is purely a tie-breaker to prevent a
+   duplicate connection, not a decision with any lasting effect on the
+   session.
+2. **Build `EntityComponentPeerMeshFormation`.** ~~Sends `{type: "roster",
+   peerIds: [...]}` once per newly-opened connection~~ — tried this first,
+   matching `identity`'s one-shot-per-connection pattern, but a 5-tab stress
+   test found it insufficient: a peer connected early never learns about a
+   peer that joins later, since its one-and-only roster snapshot is frozen
+   at whatever was true the moment *it* connected. Fixed by re-broadcasting
+   `{type: "roster", peerIds: [...]}` to **every** current connection
+   whenever the local connection set actually changes (tracked by comparing
+   against the last-broadcast id set, so it's a no-op once stable, not a
+   resend-every-frame cost) — see "Mesh formation" above for the full story.
+   On receiving a `roster` message, for every id in the list that isn't
+   already an open connection, isn't the receiver's own id, and passes the
+   tie-breaker from step 1 (own id < the new id), calls
+   `EntityComponentPeerConnection.methodConnectToRemoteId(id)` — that method
+   already no-ops if a connection to that id exists, so redundant calls are
+   harmless.
+3. **Wire it into `main.js`** on the "multiplayer" entity, alongside
+   `EntityComponentPeerConnection`/`EntityComponentPeerConnectionUI`/
+   `EntityComponentRemotePlayerManager`.
+4. **Regression-test with the existing 2-tab setup first — done.** Verified:
+   exactly one connection each side, no extras triggered, and identity/
+   transform sync (each side spawns exactly 1 remote entity) still worked
+   unchanged.
+5. **Test actual mesh formation with 3 tabs — done.** Connected A↔B
+   directly, then C to A only — B and C were never given each other's code.
+   Verified: B and C discovered and connected to each other automatically
+   via the roster relay; all three ended up with exactly the other two as
+   connections.
+6. **Stress the tie-breaker — done.** 5 tabs all connecting to the same hub
+   within milliseconds of each other, repeated across 3 runs. This is what
+   actually surfaced the "once per newcomer isn't enough" bug described in
+   "Mesh formation" above (a genuine convergence gap, not the
+   duplicate-connection race step 1 was guarding against) — after the fix,
+   all 3 repeated runs converged to a full 5-way mesh with no duplicates
+   and nothing missing.
+7. **Replace `EntityComponentPeerConnectionUI`'s green checkmark with a live
+   connection-count indicator — done.** Once more than one connection is possible,
+   a static checkmark no longer communicates anything useful. Instead: show
+   a circled-digit character (`①`, `②`, `③`, ... — Unicode `U+2460` upward,
+   consecutive code points, so `String.fromCodePoint(0x2460 + count - 1)`
+   covers 1-10 cleanly, comfortably past the ~6-player target) matching
+   `EntityComponentPeerConnection.methodGetConnectionIds().length` at that
+   moment, re-evaluated every frame (not just once) so it updates live as
+   players join or leave — unlike the old checkmark, which only ever had to
+   flip between two fixed states. Same show/hide gating as today otherwise
+   (hidden entirely at 0 connections, shown once ≥1).
+
+   **Resolved:** the code-entry input/button don't hide *permanently* once
+   connected (the old behavior, fine when 2 was the maximum but not once up
+   to ~6 players are expected to join over time) — whether *my own* input is
+   visible doesn't actually gate anything, since joining is driven by
+   whoever isn't connected yet typing *someone else's* code into *their own*
+   input, not by the state of mine. Instead they get their own collapse/
+   expand toggle, mirroring the existing cubeHUD tuning panel's `v`/`^`
+   mechanic (`tuningShowButton`/`tuningHideButton` in `main.js`) rather than
+   inventing a new UI pattern — including that mechanic's implementation
+   shape: **two separate, single-purpose buttons** (a `^` element and a `v`
+   element, toggling which is visible) rather than one button that swaps its
+   own label and click handler on each click. Two buttons keeps each one's
+   behavior fixed and simple, and avoids the more error-prone alternative of
+   re-binding (or branching inside) a single handler based on current state
+   — and it's already the one working pattern this codebase has for exactly
+   this kind of toggle, not worth a second, different way of doing the same
+   thing.
+   - A collapse button labeled `^` sits next to the input field and Connect
+     button. By default (0 connections), all three — input, button, `^` —
+     are visible.
+   - Clicking `^` hides all three (input, button, and `^` itself) and
+     reveals a separate expand button labeled `v` in their place.
+   - Clicking `v` reverses it: shows input/button/`^` again, hides `v`.
+   - **On making a connection** (the transition from 0 to ≥1 connections),
+     the UI auto-collapses exactly as if `^` had been clicked — input,
+     button, and `^` all hidden, `v` shown — so the join UI doesn't clutter
+     the screen once you're already in a session. It stays manually
+     re-expandable afterward via `v`, for as long as the session has room
+     for more players, rather than hiding for good the way the old
+     permanent-hide behavior did.
+
+   Implemented in `EntityComponentPeerConnectionUI`
+   (`entity components/peer_connection.js`): `#hasAutoCollapsedOnConnect`
+   guards the auto-collapse so it fires exactly once (on the 0→≥1
+   transition), not every frame — without that guard, a manual re-expand via
+   `v` would get silently fought and snapped shut again on the very next
+   frame, since `isConnected` stays true continuously afterward. The
+   connection-count indicator itself is independent of expand/collapse
+   state (shown whenever connected, same as the checkmark it replaces).
+   Verified: manual `^`/`v` toggle works pre-connection; auto-collapse fires
+   on first connection with the indicator correctly reading `①`; manually
+   re-expanding after that stays expanded (doesn't get fought); and with 3
+   tabs, all three converge to showing `②` once mesh formation completes
+   their second connection each.
+
 ## Status
 
 `EntityComponentPeerConnection` (multi-connection transport + `beforeunload`
 graceful close), `EntityComponentPlayerNetworkSync` (outbound `identity` +
-`transform` broadcasting), and `EntityComponentRemotePlayerManager` (remote
-cube spawn/skin/sync/despawn) are all implemented and verified for the
-2-player case — see `entity components/peer_connection.js`,
-`player_network_sync.js`, and `remote_player_manager.js`. Verified end-to-end:
-each side's remote cube exactly matches the other player's own randomly-rolled
-shape, base color, and dither color. `EntityComponentPeerMeshFormation` (the
-roster handshake needed to scale past 2 players to the full-mesh ~6-player target)
-is still design-only, per "Mesh formation" above.
+`transform` broadcasting), `EntityComponentRemotePlayerManager` (remote
+cube spawn/skin/sync/despawn), `EntityComponentPeerMeshFormation` (roster
+handshake, full mesh formation), and `EntityComponentPeerConnectionUI`'s
+connection-count indicator + collapse/expand UI are all implemented — see
+`entity components/peer_connection.js`, `player_network_sync.js`,
+`remote_player_manager.js`, and `peer_mesh_formation.js`. Verified
+end-to-end: each side's remote cube exactly matches the other player's own
+randomly-rolled shape, base color, and dither color (2-player case); mesh
+formation verified converging correctly with 3 tabs and stress-tested with
+5 tabs joining simultaneously across 3 repeated runs, with no duplicate
+connections and no missed pairs; the connection-count indicator/collapse-
+expand UI verified working pre- and post-connection (including that a
+manual re-expand after auto-collapsing isn't fought), and converging to `②`
+on all 3 tabs once mesh formation completes. TODO.md item #2 is fully done.
+Interpolating remote players' position/rotation between throttled
+`transform` updates (`TODO.md` item 7) is also done — see `MATH_TRICKS.md`
+for the interpolation math.

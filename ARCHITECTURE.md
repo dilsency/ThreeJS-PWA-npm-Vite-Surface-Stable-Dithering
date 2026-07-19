@@ -65,8 +65,9 @@ component set, so the scale problems dedicated ECS libraries solve
 (cache-friendly component storage for tens of thousands of entities, archetype
 queries) don't obviously apply here. What the code clearly *does* get from the
 ECS pattern is the decoupling: `entity_component.js`'s message-based
-`methodBroadcastMessage`/`methodRegisterInvokableHandler` means the camera
-controller and player controller don't hold direct references to each other.
+`methodSendMessageWithinEntity`/`methodRegisterMessageHandlerWithinEntity`
+means the camera controller and player controller don't hold direct
+references to each other.
 Whether that was the deliberate reason for going custom, or simply how the
 project happened to start, isn't recorded anywhere — worth confirming with
 whoever set the original convention before treating this section as settled.
@@ -78,6 +79,28 @@ disposable code (like a dev-only tuning UI) is the one accepted exception, and
 even that should be converted into a proper `EntityComponent` if it's ever
 kept permanently, rather than allowed to grow as a plain-DOM/shared-local-variable
 exception to the pattern.
+
+**Any hard-wiring in `main.js` is an exception to this pattern, full stop —
+not a legitimate resting state, even when it's a reasoned, permanent design
+choice rather than throwaway dev-tool code.** It's tempting to grade a piece
+of `main.js` wiring as "fine" because the relationship it hard-codes happens
+to be a fixed one-to-one today (exactly one sun, one HUD cube, one
+pointer-lock button) rather than the dynamic, unknown-set case
+`ECS_MESSAGING_DESIGN.md`'s "blind entities" principle is really about. Don't
+make that move: being a fixed singleton *today* doesn't make a hand-carried
+reference architecturally sound, it just makes it lower-priority to fix.
+`LIGHT_MANAGER_COUPLING.md` is the clearest example of this distinction in
+practice — it's a carefully reasoned doc for *why* `EntityComponentLightManager`
+currently takes its source light as a direct constructor reference rather
+than a `methodGetEntitiesWithComponent` lookup, with explicit conditions for
+when that would flip. Read that doc's conclusion as "this exception is
+currently the lesser evil, and here's what would trigger revisiting it" —
+never as "hand-wiring is fine here because it's a singleton." The same
+applies to every hand-wired relationship `TODO.md` item 6 tracks: their
+common thread is that they all live in `main.js` outside any
+`EntityComponent`, and that alone is reason enough to keep tracking them as
+debt, independent of whether converting each one would currently buy any
+loose-coupling benefit.
 
 ## Why a custom dithering shader instead of a material library (inferred, not confirmed)
 
@@ -117,3 +140,10 @@ nuanced than "CDN bad, npm good" or vice versa.
   similar dev tool) to a proper `EntityComponent` if ever kept permanently,
   and the related rule against sharing local variables between components via
   the init pipeline's closures.
+- `MATH_TRICKS.md` — worked, intuition-building explanations of the
+  less-obvious math formulae used (or planned) in this codebase — e.g. the
+  resettable interpolation-alpha ramp behind `TODO.md` item 7.
+- `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md` — open question (`TODO.md` item
+  6.5): should `scene`/`renderer`/`camera`/etc. get their own `EntityComponent`
+  and be looked up like everything else, or stay a hard-wired exception the
+  way `LIGHT_MANAGER_COUPLING.md`'s single light pairing does?

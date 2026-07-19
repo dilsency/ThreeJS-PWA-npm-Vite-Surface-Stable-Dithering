@@ -48,9 +48,9 @@ export class EntityComponent
 
     // registers
 
-    methodRegisterInvokableHandler(paramInvokableHandlerName, paramInvokableHandlerValue)
+    methodRegisterMessageHandlerWithinEntity(paramInvokableHandlerName, paramInvokableHandlerValue)
     {
-        this.#parent.methodRegisterInvokableHandler(paramInvokableHandlerName, paramInvokableHandlerValue);
+        this.#parent.methodRegisterMessageHandlerWithinEntity(paramInvokableHandlerName, paramInvokableHandlerValue);
     }
 
     // lifecycle
@@ -64,8 +64,12 @@ export class EntityComponent
 
     // ...
 
-    methodBroadcastMessage(paramMessage)
+    methodSendMessageWithinEntity(paramMessage)
     {
-        this.#parent.methodBroadcastMessage(paramMessage);
+        this.#parent.methodSendMessageWithinEntity(paramMessage);
+    }
+    methodSendMessageToEntitiesWithComponent(paramComponentName, paramMessage, paramEntityNameToExclude)
+    {
+        this.#parent.methodSendMessageToEntitiesWithComponent(paramComponentName, paramMessage, paramEntityNameToExclude);
     }
 }

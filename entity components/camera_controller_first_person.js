@@ -114,14 +114,18 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
     get directionForwardNonvertical(){return this.#directionForwardNonvertical;}
     get directionRightNonvertical(){return this.#directionRightNonvertical;}
 
-    // Facing direction as yaw/pitch scalars (radians), for network sync (see
-    // MULTIPLAYER_TOPOLOGY_AND_SYNC.md) rather than the direction vectors
-    // above - cameraPivot only ever rotates on Y (rotateY) and camera only
-    // ever rotates on X (rotateX), so their plain Euler components already
-    // are the yaw/pitch, with no decomposition needed.
+    // For network sync (see MULTIPLAYER_TOPOLOGY_AND_SYNC.md). Exposes each
+    // object's own quaternion rather than a derived yaw/pitch scalar pair -
+    // the real facing direction the local player sees is
+    // cameraPivot.quaternion (parent) composed with camera.quaternion
+    // (child), and sending each object's actual quaternion stays correct
+    // regardless of how their rotation logic evolves, unlike extracting
+    // yaw/pitch Euler components, which only worked because cameraPivot
+    // currently only ever rotates on Y and camera only ever rotates on X
+    // (see TODO.md's now-resolved item 3 for the full reasoning).
     methodGetPosition(){return this.#params.cameraPivot.position;}
-    methodGetYaw(){return this.#params.cameraPivot.rotation.y;}
-    methodGetPitch(){return this.#params.camera.rotation.x;}
+    methodGetCameraPivotQuaternion(){return this.#params.cameraPivot.quaternion;}
+    methodGetCameraQuaternion(){return this.#params.camera.quaternion;}
     methodInitialize()
     {
         this.#directionForward = new THREE.Vector3(0,0,-1);
@@ -134,8 +138,8 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
 
         // register handlers
         
-        this.methodRegisterInvokableHandler('update.position', (paramMessage) => { this.methodHandleUpdatePosition(paramMessage); });
-        //this.methodRegisterInvokableHandler('update.rotations', (paramMessage) => { this.methodHandleUpdateRotations(paramMessage); });
+        this.methodRegisterMessageHandlerWithinEntity('update.position', (paramMessage) => { this.methodHandleUpdatePosition(paramMessage); });
+        //this.methodRegisterMessageHandlerWithinEntity('update.rotations', (paramMessage) => { this.methodHandleUpdateRotations(paramMessage); });
     }
     methodUpdate()
     {

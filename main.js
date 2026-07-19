@@ -26,6 +26,7 @@ import {EntityComponentPeerConnection} from "./entity components/peer_connection
 import {EntityComponentPeerConnectionUI} from "./entity components/peer_connection.js";
 import {EntityComponentPlayerNetworkSync} from "./entity components/player_network_sync.js";
 import {EntityComponentRemotePlayerManager} from "./entity components/remote_player_manager.js";
+import {EntityComponentPeerMeshFormation} from "./entity components/peer_mesh_formation.js";
 
 // bare minimum
 var scene;
@@ -112,6 +113,17 @@ function init()
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.body.appendChild( renderer.domElement );
+
+        // Single source of truth for the "empty space" background color:
+        // read once from index.html's own CSS rule
+        // (`html,body,canvas#canvas{background-color:...}`) rather than
+        // hardcoding the same value again here. Both the world scene's real
+        // clear color (this) and the HUD panel behind cubeHUD (main.js's
+        // componentPanelHUD, which used to fall back to its own hardcoded
+        // sky-blue default) derive from this one read. See TODO.md, item 4.
+        // Must run after appendChild() above so the element is actually in
+        // the DOM and its id selector match is reliable.
+        scene.background = new THREE.Color(getComputedStyle(canvas).backgroundColor);
     }
 
     //
@@ -495,6 +507,7 @@ function init()
         const componentPanelHUD = new EntityComponentBackgroundPlane({scene:sceneHUD,
             positionOffset:cubeHUDLayout.panelPositionOffset,
             size:cubeHUDLayout.panelSize,
+            color: scene.background, // match the main scene's background instead of the class's own sky-blue default - see TODO.md, item 4
         });
         entityHUD.methodAddComponentWithName("EntityComponentBackgroundPlane", componentPanelHUD);
 
@@ -825,6 +838,16 @@ function init()
         entityManager.methodAddEntity(entityMultiplayer, "multiplayer");
         entityMultiplayer.methodAddComponentWithName("EntityComponentPeerConnection", new EntityComponentPeerConnection());
         entityMultiplayer.methodAddComponentWithName("EntityComponentPeerConnectionUI", new EntityComponentPeerConnectionUI());
+        // Roster handshake so a newly-joined player converges to a full mesh
+        // with everyone already in the session, not just the one peer whose
+        // code they typed - see MULTIPLAYER_TOPOLOGY_AND_SYNC.md's
+        // implementation plan. Registered before EntityComponentRemotePlayerManager
+        // below on purpose: both read EntityComponentPeerConnection's
+        // per-frame message snapshot, and that snapshot is only populated
+        // once EntityComponentPeerConnection's own methodUpdate() has run
+        // this frame, which registration order (not this line's position)
+        // actually guarantees - see that component's methodUpdate() comment.
+        entityMultiplayer.methodAddComponentWithName("EntityComponentPeerMeshFormation", new EntityComponentPeerMeshFormation());
         // Spawns/despawns a placeholder cube per connected remote player and
         // applies their incoming position/rotation updates - see
         // MULTIPLAYER_TOPOLOGY_AND_SYNC.md.
@@ -860,6 +883,13 @@ function update()
     updateEntityComponentSystem();
 
     // must be last
+    // autoClear is reset to true here every frame: the previous frame left it
+    // false (below), so without this the world pass would silently stop
+    // clearing color/depth from the 2nd frame onward and scene.background
+    // would never actually get drawn - HUD_DEPTH_CLEARING.md's "the world
+    // scene's initial implicit clear... via autoClear's default true" only
+    // actually held for frame 1 before this fix. See TODO.md, item 4.
+    renderer.autoClear = true;
     renderer.render(scene, camera);
     renderer.autoClear = false;
     renderer.clearDepth(); // HUD always draws on top of `scene` — see HUD_DEPTH_CLEARING.md
