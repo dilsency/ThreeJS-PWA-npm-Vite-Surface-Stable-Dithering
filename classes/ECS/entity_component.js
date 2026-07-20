@@ -17,6 +17,10 @@ export class EntityComponent
     }
 
     // getters
+    methodGetEntityByName(paramName)
+    {
+        return this.#parent.methodGetEntityByName(paramName);
+    }
     methodGetEntitiesWithComponent(paramComponentName, paramEntityNameToExclude)
     {
         return this.#parent.methodGetEntitiesWithComponent(paramComponentName, paramEntityNameToExclude);
@@ -26,6 +30,38 @@ export class EntityComponent
         return this.#parent.methodGetComponent(paramComponentName);
     }
     methodGetParent(){return this.#parent;}
+
+    // getters - shorthand for bare-minimum Three.js state owned by the
+    // "EngineContext" entity's EntityComponentEngineContext - see
+    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md. `scene`/`sceneHUD`/`renderer`/
+    // `camera`/`cameraPivot` exist so far; add `methodGetCameraHUD` the same
+    // way once EntityComponentEngineContext grows to hold it. None of these
+    // cache the lookup itself - a per-frame consumer should resolve once in
+    // its own methodInitialize() and stash the result, the way
+    // EntityComponentCameraControllerFirstPerson and
+    // EntityComponentLightManager both already do, rather than calling
+    // these fresh every frame.
+
+    methodGetScene()
+    {
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetScene();
+    }
+    methodGetSceneHUD()
+    {
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetSceneHUD();
+    }
+    methodGetRenderer()
+    {
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetRenderer();
+    }
+    methodGetCamera()
+    {
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetCamera();
+    }
+    methodGetCameraPivot()
+    {
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetCameraPivot();
+    }
 
     // getters, but actually for the parent
 

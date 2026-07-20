@@ -328,11 +328,72 @@ exists ahead of a use case rather than being exercised by anything today.
 
 ## 10. `methodGetEntityByName` + a named "EngineContext" entity for bare-minimum Three.js state
 
-Not yet implemented — still an open design question, not a decision. Full
-reasoning in `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`; this item tracks
-the concrete mechanism that doc proposes as an answer to item 6.5's
-"flagged for a deliberate decision" cluster (`scene`/`sceneHUD`/`renderer`/
-`camera`/`cameraPivot`/`cameraHUD`), rather than duplicating that item.
+**Mechanism proven for `scene`, `sceneHUD`, `renderer`, `camera`, and
+`cameraPivot`; only `cameraHUD` remains.** Full reasoning and status in
+`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`; this item tracks the concrete
+mechanism that doc proposes as an answer to item 6.5's "flagged for a
+deliberate decision" cluster (`scene`/`sceneHUD`/`renderer`/`camera`/
+`cameraPivot`/`cameraHUD`), rather than duplicating that item.
+
+**Done:** `EntityManager.methodGetEntityByName`, `EntityComponentEngineContext`
+(now holding `scene`/`renderer`/`camera`/`cameraPivot`,
+`entity components/engine_context.js`),
+`EntityComponent.methodGetScene()`/`methodGetRenderer()`/`methodGetCamera()`/
+`methodGetCameraPivot()`, and `main.js`'s `initEngineContext()` step.
+Converted `EntityComponentRemotePlayerManager` for `scene`,
+`EntityComponentButtonPointerLock` for `renderer`, and
+`EntityComponentCameraControllerFirstPerson` for `camera`/`cameraPivot`
+(caching all three resolved references in `methodInitialize()`, since this
+component reads/mutates them every `methodUpdate()` call — a fresh lookup
+60×/sec would be wasteful, and caching is safe since neither object is ever
+replaced after construction, only mutated in place). Also adapted
+`EntityComponentLightManager` — its `sourceReferencePoint` constructor
+param (deliberately generic, but in practice always fed the world camera)
+is now fetched via `this.methodGetCamera()` internally instead; its
+`targetReferencePoint` param (the HUD cube component) is untouched, since
+that's a cross-entity component reference, not a bare-minimum object, and
+belongs to item 6.4 instead. None of the three converted consumers were the
+doc's originally-suggested test candidates
+(`EntityComponentDirectionalLight`/`EntityComponentTestCube`), since both
+of those are reused across `scene`- and `sceneHUD`-backed instances and
+converting either outright would've broken its `sceneHUD` instantiations.
+Verified via `npm run build` plus real browser tests each time: a 2-tab
+PeerJS connection test for `scene` and again for `camera`/`cameraPivot`
+(confirming `EntityComponentPlayerNetworkSync`'s reads of the camera
+controller's getters still work end-to-end), a headless click-through of
+the PointerLock button for `renderer` (which surfaced a real Pointer Lock
+API rejection in headless Chromium — confirmed via `git stash`/`git stash
+pop` against the last pushed commit to be a pre-existing environment
+limitation, not a regression), and a mouse-look/WASD/reset-key exercise for
+`camera`/`cameraPivot` covering 30+ frames of both the camera controller
+and `EntityComponentLightManager`'s `methodUpdate()` — see
+`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s experiment sections for full
+verification detail on all three.
+
+**`sceneHUD` done too:** `EntityComponentEngineContext` now also holds
+`sceneHUD`, with a matching `EntityComponent.methodGetSceneHUD()`.
+Converted `EntityComponentBackgroundPlane` directly (single instantiation,
+no roadblock, same shape as `scene`/`renderer`'s easy picks). For the
+reused classes this conversion couldn't route around
+(`EntityComponentTestCube`/`EntityComponentDirectionalLight`, both back
+`scene`- and `sceneHUD`-flavored instances): gave each an overridable
+`methodGetTargetScene()` hook (defaulting to `this.methodGetScene()`), with
+`EntityComponentTestCubeHUD` (already existed) and the new
+`EntityComponentDirectionalLightHUD` (mirrors it) each overriding just that
+hook to return `this.methodGetSceneHUD()` — subclasses chosen over a
+constructor flag (`{isHUD: true}`) for consistency with the existing
+`EntityComponentTestCubeHUD` precedent, and because HUD-specific components
+may grow their own HUD-only needs over time that a plain flag wouldn't
+leave room for. Verified via `npm run build`, a screenshot confirming
+cubeHUD/the HUD panel render correctly in `sceneHUD`, a second screenshot
+confirming the world scene (ground, correctly lit/shadowed) still renders
+correctly through the same default path, and a re-run of the 2-tab PeerJS
+test confirming remote-player cube spawning still works — see
+`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s `sceneHUD` section for full
+detail.
+
+**Still open:** only `cameraHUD` remains.
+Deciding how to handle that is still unresolved.
 
 **The proposal:** add `EntityManager.methodGetEntityByName(paramName)` —
 delegated through `Entity`/`EntityComponent` the same way

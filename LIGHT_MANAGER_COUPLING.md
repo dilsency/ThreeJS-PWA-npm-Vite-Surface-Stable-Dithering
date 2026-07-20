@@ -10,6 +10,19 @@ alternative, which this project's ECS already supports, is a runtime lookup: hav
 has an `EntityComponentDirectionalLight`" instead of being handed it directly.
 This doc is about that choice, not a proposal to change it yet.
 
+**Not to be confused with `sourceReferencePoint` (a different field on this
+same class):** this doc is entirely about `source`/`#sourceLightComponent`
+(`componentLightWorld`), which is still a direct reference, unconverted, as
+described below. The *other* hand-wired field this class used to take,
+`sourceReferencePoint` (always the world camera in practice), has since been
+converted to a cached `EntityComponentEngineContext` lookup
+(`this.methodGetCamera()`, resolved once in `methodInitialize()`) — see
+`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`. That was a different kind of
+value (a bare-minimum Three.js singleton, not a specific other entity's
+component) and a different decision from the one this doc works through;
+don't read this doc's "kept direct reference for now" conclusion as also
+covering `sourceReferencePoint`.
+
 ## The two approaches
 
 **Direct reference (what we have now).** `main.js` builds `sun`'s light component,

@@ -150,7 +150,7 @@ export class EntityComponentTestCube extends EntityComponent
             this.#cube = new THREE.Mesh(geometry, material);
             this.#cube.castShadow = true;
             this.#cube.receiveShadow = true;
-            this.#params.scene.add(this.#cube);
+            this.methodGetTargetScene().add(this.#cube);
 
             this.#cube.position.x += this.#positionOffset.x;
             this.#cube.position.y += this.#positionOffset.y;
@@ -173,6 +173,18 @@ export class EntityComponentTestCube extends EntityComponent
     // getters
 
     methodGetCube(){return this.#cube;}
+
+    // Which scene this cube's mesh belongs in - defaults to the world scene.
+    // EntityComponentTestCube is reused for both world cubes (ground, the
+    // sun's cube) and cubeHUD, and those need different scenes - overridden
+    // by EntityComponentTestCubeHUD below rather than passed as a
+    // constructor param, so each subclass states which scene it belongs to
+    // once, structurally, instead of every instantiation having to say so.
+    // See BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md.
+    methodGetTargetScene()
+    {
+        return this.methodGetScene();
+    }
 
     // handlers
 
@@ -207,6 +219,15 @@ export class EntityComponentTestCubeHUD extends EntityComponentTestCube
         {
             this.#yawRadians = params.yawRadians;
         }
+    }
+
+    // getters
+
+    // cubeHUD lives in sceneHUD, not the world scene - see
+    // EntityComponentTestCube.methodGetTargetScene()'s comment.
+    methodGetTargetScene()
+    {
+        return this.methodGetSceneHUD();
     }
 
      // lifecycle
@@ -308,7 +329,11 @@ export class EntityComponentBackgroundPlane extends EntityComponent
 
         //
         this.#plane = new THREE.Mesh(geometry, material);
-        this.#params.scene.add(this.#plane);
+        // Always the HUD panel behind cubeHUD - unlike EntityComponentTestCube,
+        // this class has exactly one instantiation in the whole codebase, so
+        // there's no reused-class ambiguity to route around via an overridable
+        // hook - see BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md.
+        this.methodGetSceneHUD().add(this.#plane);
 
         this.#plane.position.x += this.#positionOffset.x;
         this.#plane.position.y += this.#positionOffset.y;
@@ -384,7 +409,7 @@ export class EntityComponentButtonPointerLock extends EntityComponent
 
     async methodOnClickButton(e)
     {
-        await this.#params.renderer.domElement.requestPointerLock();
+        await this.methodGetRenderer().domElement.requestPointerLock();
     }
 
     methodOnPointerLockChange(e)
@@ -408,7 +433,7 @@ export class EntityComponentButtonPointerLock extends EntityComponent
 
     methodGetIsPointerLocked()
     {
-        const res = (this.#params.document.pointerLockElement == null || this.#params.document.pointerLockElement == undefined || this.#params.document.pointerLockElement !== this.#params.renderer.domElement);
+        const res = (this.#params.document.pointerLockElement == null || this.#params.document.pointerLockElement == undefined || this.#params.document.pointerLockElement !== this.methodGetRenderer().domElement);
 
         return !res;
     }

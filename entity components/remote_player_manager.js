@@ -29,7 +29,10 @@ import {EntityComponentTestCube} from "./test_objects.js";
 export class EntityComponentRemotePlayerManager extends EntityComponent
 {
     // bare minimum
-    #params = null; // {scene, entityManager, colorPaletteBody, colorPaletteDither, interpolationDurationSeconds}
+    #params = null; // {entityManager, colorPaletteBody, colorPaletteDither, interpolationDurationSeconds}
+    // `scene` is no longer part of #params - fetched via this.methodGetScene()
+    // instead (see BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md; this is the
+    // cheap one-component experiment that doc proposed)
 
     //
     #remoteEntities = new Map(); // peerId -> Entity
@@ -110,9 +113,10 @@ export class EntityComponentRemotePlayerManager extends EntityComponent
         if(entity == null){return;}
         if(entity.methodGetComponent("EntityComponentTestCube") != null){return;} // already applied - identity is only ever sent once, but stay idempotent
 
-        //
+        // no `scene` param needed - EntityComponentTestCube resolves its own
+        // target scene internally now (methodGetTargetScene(), defaulting to
+        // methodGetScene()) - see BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md
         entity.methodAddComponentWithName("EntityComponentTestCube", new EntityComponentTestCube({
-            scene: this.#params.scene,
             name: "RemotePlayer" + peerId,
             lighting: true,
             spin: false,
@@ -139,7 +143,7 @@ export class EntityComponentRemotePlayerManager extends EntityComponent
             // the leak is small. Worth revisiting if entities start
             // spawning/despawning far more often than "a player joins/leaves
             // a session."
-            this.#params.scene.remove(cube);
+            this.methodGetScene().remove(cube);
         }
 
         //

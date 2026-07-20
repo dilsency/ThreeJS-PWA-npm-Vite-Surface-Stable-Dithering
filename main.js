@@ -21,12 +21,14 @@ import {EntityComponentTestCubeHUD} from "./entity components/test_objects.js";
 import {EntityComponentBackgroundPlane} from "./entity components/test_objects.js";
 import {EntityComponentButtonPointerLock} from "./entity components/test_objects.js";
 import {EntityComponentDirectionalLight} from "./entity components/lighting.js";
+import {EntityComponentDirectionalLightHUD} from "./entity components/lighting.js";
 import {EntityComponentLightManager} from "./entity components/lighting.js";
 import {EntityComponentPeerConnection} from "./entity components/peer_connection.js";
 import {EntityComponentPeerConnectionUI} from "./entity components/peer_connection.js";
 import {EntityComponentPlayerNetworkSync} from "./entity components/player_network_sync.js";
 import {EntityComponentRemotePlayerManager} from "./entity components/remote_player_manager.js";
 import {EntityComponentPeerMeshFormation} from "./entity components/peer_mesh_formation.js";
+import {EntityComponentEngineContext} from "./entity components/engine_context.js";
 
 // bare minimum
 var scene;
@@ -137,6 +139,26 @@ function init()
     }
 
     //
+    // Builds the "EngineContext" entity before anything else - deliberately
+    // its own step, not folded into initEntityComponents(), so the ordering
+    // guarantee ("EngineContext exists before any component that might call
+    // this.methodGetScene()/this.methodGetRenderer()") is visible at
+    // init()'s own top-level call sequence rather than depending on this
+    // being the first few statements inside a much larger function. See
+    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md's "Ensuring EngineContext
+    // initializes before everything else" section.
+    function initEngineContext()
+    {
+        //
+        console.log("init engine context");
+
+        //
+        const entityEngineContext = new Entity(null);
+        entityManager.methodAddEntity(entityEngineContext, "EngineContext");
+        entityEngineContext.methodAddComponentWithName("EntityComponentEngineContext", new EntityComponentEngineContext({scene: scene, sceneHUD: sceneHUD, renderer: renderer, camera: camera, cameraPivot: cameraPivot,}));
+    }
+
+    //
     function initEntityComponents()
     {
         //
@@ -181,7 +203,7 @@ function init()
         const entityA = new Entity(null);
         entityManager.methodAddEntity(entityA, "player");
         //
-        entityA.methodAddComponentWithName("EntityComponentCameraControllerFirstPerson", new EntityComponentCameraControllerFirstPerson({scene: scene, camera: camera, cameraPivot: cameraPivot,}));
+        entityA.methodAddComponentWithName("EntityComponentCameraControllerFirstPerson", new EntityComponentCameraControllerFirstPerson());
         entityA.methodAddComponentWithName("EntityComponentCameraControllerFirstPersonInput", new EntityComponentCameraControllerFirstPersonInput());
         //
         entityA.methodAddComponentWithName("EntityComponentPlayerController", new EntityComponentPlayerController({cameraPivot: cameraPivot,}));
@@ -233,19 +255,19 @@ function init()
         //
         const entityGround = new Entity(null);
         entityManager.methodAddEntity(entityGround, "ground");
-        entityGround.methodAddComponentWithName("EntityComponentTestCube", new EntityComponentTestCube({scene:scene,name:"ground",lighting:true,spin:false,size:groundSize,positionOffset:groundPositionOffset,shape:6,}));
+        entityGround.methodAddComponentWithName("EntityComponentTestCube", new EntityComponentTestCube({name:"ground",lighting:true,spin:false,size:groundSize,positionOffset:groundPositionOffset,shape:6,}));
 
         //
         const entityLight = new Entity(null);
         entityManager.methodAddEntity(entityLight, "sun");
-        const componentLightWorld = new EntityComponentDirectionalLight({scene:scene,position:new THREE.Vector3(5,8,5),target:new THREE.Vector3(0,0,0),});
+        const componentLightWorld = new EntityComponentDirectionalLight({position:new THREE.Vector3(5,8,5),target:new THREE.Vector3(0,0,0),});
         entityLight.methodAddComponentWithName("EntityComponentDirectionalLight", componentLightWorld);
-        entityLight.methodAddComponentWithName("EntityComponentTestCube", new EntityComponentTestCube({scene:scene,name:"CubeG",lighting:true,positionOffset:{x:5,y:8,z:5},color1Texture:false,color2:0xffFF00,textureFile:'texture_checkerboard_alphamask.png',shape:5,}));
+        entityLight.methodAddComponentWithName("EntityComponentTestCube", new EntityComponentTestCube({name:"CubeG",lighting:true,positionOffset:{x:5,y:8,z:5},color1Texture:false,color2:0xffFF00,textureFile:'texture_checkerboard_alphamask.png',shape:5,}));
 
         //
         const entityC = new Entity(null);
         entityManager.methodAddEntity(entityC, "pointerLockButton");
-        const componentPointerLockButton = new EntityComponentButtonPointerLock({document:document,renderer:renderer,});
+        const componentPointerLockButton = new EntityComponentButtonPointerLock({document:document,});
         entityC.methodAddComponentWithName("EntityComponentButtonPointerLock", componentPointerLockButton);
 
         const entityD = new Entity(null);
@@ -504,14 +526,14 @@ function init()
 
         let cubeHUDLayout = computeCubeHUDLayout(cubeHUDHorizontalAlignment);
 
-        const componentPanelHUD = new EntityComponentBackgroundPlane({scene:sceneHUD,
+        const componentPanelHUD = new EntityComponentBackgroundPlane({
             positionOffset:cubeHUDLayout.panelPositionOffset,
             size:cubeHUDLayout.panelSize,
             color: scene.background, // match the main scene's background instead of the class's own sky-blue default - see TODO.md, item 4
         });
         entityHUD.methodAddComponentWithName("EntityComponentBackgroundPlane", componentPanelHUD);
 
-        const componentCubeHUD = new EntityComponentTestCubeHUD({scene:sceneHUD,name:"model",
+        const componentCubeHUD = new EntityComponentTestCubeHUD({name:"model",
             positionOffset:cubeHUDLayout.positionOffset,
             size:cubeHUDSize,
             tiltFactor:cubeHUDTiltFactor,
@@ -818,10 +840,11 @@ function init()
         // nothing worth casting/receiving a shadow map, so castShadow is off here.
         const entityLightHUD = new Entity(null);
         entityManager.methodAddEntity(entityLightHUD, "hudSun");
-        entityLightHUD.methodAddComponentWithName("EntityComponentDirectionalLight", new EntityComponentDirectionalLight({scene:sceneHUD,position:new THREE.Vector3(5,8,5),target:new THREE.Vector3(0,0,0),castShadow:false,}));
+        entityLightHUD.methodAddComponentWithName("EntityComponentDirectionalLight", new EntityComponentDirectionalLightHUD({position:new THREE.Vector3(5,8,5),target:new THREE.Vector3(0,0,0),castShadow:false,}));
         entityLightHUD.methodAddComponentWithName("EntityComponentLightManager", new EntityComponentLightManager({
             source:componentLightWorld,
-            sourceReferencePoint:camera, // main scene camera: the sun's offset is measured from here
+            // sourceReferencePoint is no longer passed here - EntityComponentLightManager
+            // now fetches the world camera itself via methodGetCamera() (EngineContext)
             targetReferencePoint:componentCubeHUD, // HUD cube: the same offset is re-applied from here
             // facing the sun head-on should fully light the HUD cube's near (camera-facing)
             // side, not its far side — see EntityComponentLightManager's field comment.
@@ -851,7 +874,7 @@ function init()
         // Spawns/despawns a placeholder cube per connected remote player and
         // applies their incoming position/rotation updates - see
         // MULTIPLAYER_TOPOLOGY_AND_SYNC.md.
-        entityMultiplayer.methodAddComponentWithName("EntityComponentRemotePlayerManager", new EntityComponentRemotePlayerManager({scene: scene, entityManager: entityManager, colorPaletteBody: playerColorPaletteBody, colorPaletteDither: playerColorPaletteDither,}));
+        entityMultiplayer.methodAddComponentWithName("EntityComponentRemotePlayerManager", new EntityComponentRemotePlayerManager({entityManager: entityManager, colorPaletteBody: playerColorPaletteBody, colorPaletteDither: playerColorPaletteDither,}));
     }
 
     //
@@ -859,6 +882,7 @@ function init()
 
     //
     initECS();
+    initEngineContext();
     initEntityComponents();
 
     //

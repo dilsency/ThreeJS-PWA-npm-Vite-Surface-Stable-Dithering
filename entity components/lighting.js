@@ -52,8 +52,8 @@ export class EntityComponentDirectionalLight extends EntityComponent
         }
 
         //
-        this.#params.scene.add(this.#light);
-        this.#params.scene.add(this.#light.target);
+        this.methodGetTargetScene().add(this.#light);
+        this.methodGetTargetScene().add(this.#light.target);
     }
 
     methodUpdate(timeElapsed, timeDelta)
@@ -63,6 +63,31 @@ export class EntityComponentDirectionalLight extends EntityComponent
     // getters
 
     methodGetLight(){return this.#light;}
+
+    // Which scene this light belongs in - defaults to the world scene.
+    // EntityComponentDirectionalLight is reused for both the world sun and
+    // (via EntityComponentDirectionalLightHUD below) the HUD sun, and those
+    // need different scenes - overridden the same way
+    // EntityComponentTestCube/EntityComponentTestCubeHUD handle it. See
+    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md.
+    methodGetTargetScene()
+    {
+        return this.methodGetScene();
+    }
+}
+
+// HUD variant of EntityComponentDirectionalLight - exists purely to override
+// methodGetTargetScene() below, so main.js's hudSun instantiation no longer
+// needs a hard-wired `scene:sceneHUD` constructor param. Mirrors
+// EntityComponentTestCubeHUD's existing role for cubeHUD - see
+// BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md for why a small subclass was
+// chosen here over a constructor flag.
+export class EntityComponentDirectionalLightHUD extends EntityComponentDirectionalLight
+{
+    methodGetTargetScene()
+    {
+        return this.methodGetSceneHUD();
+    }
 }
 
 // Keeps a "follower" EntityComponentDirectionalLight (e.g. one living in sceneHUD)
@@ -76,9 +101,9 @@ export class EntityComponentDirectionalLight extends EntityComponent
 // the source light's raw position/target directly (as an earlier version of this
 // component did) only "worked" by coincidence, because both were hardcoded to the
 // same numbers. What actually needs to carry over is the RELATIONSHIP between the
-// source light and a source reference point (the main camera): we take
-// `sourceLight.position - sourceReferencePoint.position` in world space, rotate
-// that offset into the source reference point's own local axes (so it's expressed
+// source light and the world camera: we take
+// `sourceLight.position - camera.position` in world space, rotate
+// that offset into the camera's own local axes (so it's expressed
 // as "how the sun currently looks relative to which way the camera is facing",
 // not "where the sun is in fixed world axes" — the latter wouldn't change at all
 // as the camera turns, which is the whole point: turning the main camera to face
@@ -88,6 +113,16 @@ export class EntityComponentDirectionalLight extends EntityComponent
 // camera never rotates, so its local axes ARE its world axes — applying a
 // camera-local offset directly as a sceneHUD-world offset is exactly the mapping
 // we want.
+//
+// The "source reference point" used to be a generic constructor param
+// (`sourceReferencePoint`, documented as "e.g. the main camera") - in
+// practice this project only ever passed the world camera, so it's now
+// fetched directly via `this.methodGetCamera()` (EngineContext - see
+// BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md) instead of staying generic for
+// a genericity nothing in this codebase actually used. `targetReferencePoint`
+// (the HUD cube component) stays a constructor param - it's a real
+// cross-entity component reference, not a bare-minimum Three.js object, and
+// converting it is a separate matter (see TODO.md item 6.4).
 export class EntityComponentLightManager extends EntityComponent
 {
     // bare minimum
@@ -96,7 +131,7 @@ export class EntityComponentLightManager extends EntityComponent
     //
     #sourceLightComponent = null;
     #targetLightComponent = null;
-    #sourceReferencePoint = null; // THREE.Object3D the source offset is measured from (e.g. the main camera)
+    #sourceReferencePoint = null; // the world camera, fetched via methodGetCamera() - see class comment above
     #targetReferencePoint = null; // EntityComponentTestCube(HUD) the same offset is re-applied from (e.g. the HUD cube)
     #reverseDirection = false; // see reverseDirection param below
 
@@ -112,7 +147,6 @@ export class EntityComponentLightManager extends EntityComponent
         super(params);
         this.#params = params;
 
-        this.#sourceReferencePoint = params.sourceReferencePoint;
         this.#targetReferencePoint = params.targetReferencePoint;
         // A literal mapping lights the target reference's FAR side whenever the
         // source reference faces the source light head-on (the light ends up
@@ -143,6 +177,10 @@ export class EntityComponentLightManager extends EntityComponent
         this.#sourceLightComponent = this.#params.source;
         // the light we keep in sync lives on this same entity
         this.#targetLightComponent = this.methodGetComponent("EntityComponentDirectionalLight");
+        // cached here rather than looked up fresh every methodUpdate() call -
+        // same reasoning as EntityComponentCameraControllerFirstPerson's own
+        // cached camera/cameraPivot references
+        this.#sourceReferencePoint = this.methodGetCamera();
     }
 
     methodUpdate(timeElapsed, timeDelta)

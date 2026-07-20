@@ -69,6 +69,10 @@ export class Entity
 
     // getters
 
+    methodGetEntityByName(paramName)
+    {
+        return this.#parent.methodGetEntityByName(paramName);
+    }
     methodGetEntitiesWithComponent(paramComponentName, paramEntityNameToExclude)
     {
         return this.#parent.methodGetEntitiesWithComponent(paramComponentName, paramEntityNameToExclude);

@@ -1,11 +1,17 @@
 # Bare-minimum Three.js: exception or not?
 
-Status: **open design question, nothing decided or implemented.** This doc
-lays out the question, not an answer — see `TODO.md` item 6.5, which already
-tracks this exact cluster ("flagged for a deliberate decision rather than
-silently excluded") without resolving it either. `TODO.md` item 10 tracks
-the concrete mechanism proposed below (`methodGetEntityByName` + a named
-`"EngineContext"` entity) as its own task.
+Status: **still an open question overall, but the mechanism itself is now
+proven for five of the six values, plus cameraPivot (not a Three.js value,
+but tightly tied to camera in this project).** `scene` (via
+`EntityComponentRemotePlayerManager`), `renderer` (via
+`EntityComponentButtonPointerLock`), `camera`/`cameraPivot` (via
+`EntityComponentCameraControllerFirstPerson`, plus adapting
+`EntityComponentLightManager` to fetch `camera` itself instead of receiving
+it as a generic param), and `sceneHUD` (which also resolved the reused-class
+complication, via HUD-specific subclasses) are all converted and verified —
+see "A cheap way to actually find out." Only `cameraHUD` remains; see
+`TODO.md` item 6.5 (the original cluster) and item 10 (this mechanism
+specifically).
 
 ## The question
 
@@ -251,16 +257,9 @@ all.
 
 **Not cached inside the getter itself.** Keep these stateless, mirroring
 `methodGetComponent`/`methodGetEntitiesWithComponent`, neither of which
-caches either. Whether an individual *consumer* wants to resolve `scene`
-once in its own `methodInitialize()` and stash it in a private field (the
-way `EntityComponentLightManager` already does for its own sibling-light
-lookup) versus calling `this.methodGetScene()` fresh every frame is each
-component's own call — most only need it once, at mesh-construction time,
-so this rarely matters in practice. The lookup itself is cheap regardless
-of how often it runs (same "non-issue" analysis as
-`LIGHT_MANAGER_COUPLING.md`'s "Performance" section — a linear scan over a
-dozen-ish entities, not a per-frame cost concern even if called every
-frame).
+caches either. Whether an individual *consumer* caches the result is a
+separate, settled question — see "Caching a resolved lookup is fine" below
+for what that means and why it's safe.
 
 **Failure mode stays consistent with the rest of the ECS.** If the
 `"EngineContext"` entity somehow doesn't exist yet when one of these is
@@ -268,6 +267,51 @@ called (a startup-ordering bug, not an expected runtime state), the
 optional-chaining just returns `undefined` — the same "no exception,
 caller's job to null-check" contract `methodGetComponent` already has, not
 a new failure mode to design around.
+
+## Caching a resolved lookup is fine
+
+Settled, and general — this isn't specific to `scene`, or to any one
+consumer.
+
+**What "caching" means here:** resolving the full lookup chain —
+`this.methodGetEntityByName("EngineContext")`, then
+`.methodGetComponent("EntityComponentEngineContext")`, then the specific
+getter (`.methodGetScene()`, `.methodGetCamera()`, etc.) — exactly once,
+typically inside a component's own `methodInitialize()`, and storing the
+returned reference in a private field. Every later read (in
+`methodUpdate()` or anywhere else) uses that stored field directly, instead
+of re-running the lookup chain each time it's needed. This is *not* the
+same thing as caching inside the shorthand getters themselves (see above,
+still stateless) — it's each consumer choosing to remember the result of
+one call it already made.
+
+**Why this is safe, not just fast:** every value `EngineContext` holds
+(`scene`, `renderer`, `camera`, `cameraPivot`, and whatever gets added
+later) is constructed exactly once, in `main.js`'s `initBareMinimum()`,
+before `EngineContext` itself is even built. Nothing anywhere in this
+codebase ever constructs a *replacement* scene/renderer/camera/cameraPivot
+and swaps it in later — these objects are only ever *mutated in place*
+(rotated, moved, resized) for the rest of the app's lifetime, never
+reassigned to point at a different object. The `"EngineContext"` entity
+itself is also permanent: unlike, say, a remote player's entity (spawned
+and despawned as peers connect/disconnect — caching a reference to *that*
+kind of entity would be genuinely unsafe, since the cached reference could
+outlive the real thing), `EngineContext` is built once during `init()` and
+never removed. So a cached reference can't go stale the way a cached
+reference to something temporary could — there's no scenario where the
+object a component cached actually changes out from under it. (Performance
+was never really the deciding factor either way, for the same reason
+`LIGHT_MANAGER_COUPLING.md`'s "Performance" section gives for its own,
+different lookup: a linear scan over a dozen-ish entities is a sub-millisecond,
+one-time cost regardless of how often it's called — caching is about
+avoiding *pointless* repeated work, not fixing something that was ever
+actually slow.)
+
+**Already applied this way:** `EntityComponentCameraControllerFirstPerson`
+caches `scene`/`camera`/`cameraPivot` once in `methodInitialize()`, since it
+reads and mutates them every `methodUpdate()` call; `EntityComponentLightManager`
+caches `camera` (via its `sourceReferencePoint` field) the same way, for the
+same reason. See "`camera`/`cameraPivot` — done too" below for both.
 
 ## Ensuring EngineContext initializes before everything else
 
@@ -334,22 +378,179 @@ is worth the one extra named function.
   signal than a confusing `undefined` three calls deep in unrelated code, if
   the ordering invariant above is ever accidentally broken by a future edit.
 
-## A cheap way to actually find out
+## A cheap way to actually find out — done, for `scene` and `renderer`
 
-Rather than converting every component at once, try it on exactly one:
-pick a single, low-stakes consumer (e.g. `EntityComponentDirectionalLight`
-for the world sun, or the ground's `EntityComponentTestCube`), add
-`methodGetEntityByName` to the ECS classes, build a minimal
-`EntityComponentEngineContext` holding just `scene` for now, add just
-`EntityComponent.methodGetScene()` (the one shorthand getter this first
-slice actually needs), attach the context to a new entity named
-`"EngineContext"` via a minimal `initEngineContext()` step called before
-`initEntityComponents()`, and convert only that one component's `scene`
-access to `this.methodGetScene()`. Run `npm run dev`, confirm nothing
-regresses, before deciding whether to mechanically repeat it — both the
-`EntityComponentEngineContext` fields and their matching shorthand getters —
-for every other component and every other bare-minimum object
-(`sceneHUD`/`renderer`/`camera`/`cameraPivot`/`cameraHUD`). This answers
-"does it work" cheaply, and gives a real, concrete example to judge "is the
-resulting code actually better" against, rather than deciding either
-question in the abstract.
+Implemented and verified. What actually got built, and one deliberate
+deviation from the plan above:
+
+- `EntityManager.methodGetEntityByName(paramName)` (`classes/ECS/entity_manager.js`),
+  delegated through `Entity`/`EntityComponent` the same way
+  `methodGetEntitiesWithComponent` already is.
+- A minimal `EntityComponentEngineContext` (`entity components/engine_context.js`)
+  holding just `scene` for now, with a deliberately synchronous
+  `methodInitialize()` (see "Ensuring EngineContext initializes before
+  everything else" above).
+- `EntityComponent.methodGetScene()` — the one shorthand getter this first
+  slice needs.
+- `main.js`'s `initEngineContext()`, called between `initECS()` and
+  `initEntityComponents()`, builds the `"EngineContext"` entity first.
+
+**Deviation from the original plan:** the doc originally suggested
+`EntityComponentDirectionalLight` or the ground's `EntityComponentTestCube`
+as the one component to convert. Both turned out to be a worse fit than
+they looked — both classes are *reused* across multiple instantiations that
+need different scenes (`EntityComponentTestCube` backs the ground/sun-cube
+with `scene` but cubeHUD with `sceneHUD`; `EntityComponentDirectionalLight`
+backs the world sun with `scene` but the HUD sun with `sceneHUD`). Converting
+either class outright would've broken its `sceneHUD` instantiations, since
+`EntityComponentEngineContext` only holds `scene` at this stage. Converted
+`EntityComponentRemotePlayerManager` instead — it has exactly one
+instantiation in the whole codebase, and it only ever means the world
+`scene`, so there's no ambiguity to work around.
+
+**Verified:** `npm run build` clean. A real 2-tab PeerJS connection test
+(headless Chromium, both tabs exchanging live `"identity"`/`transform`
+messages — the exact path that calls `EntityComponentRemotePlayerManager.methodApplyIdentity()`,
+which is where the converted `this.methodGetScene()` call actually lives)
+produced zero console errors on either side, confirming the lookup resolves
+correctly at runtime, not just at build time.
+
+## `renderer` — done too
+
+Converted next, same pattern: `EntityComponentEngineContext` now also holds
+`renderer` (set in the same synchronous `methodInitialize()`), with a
+matching `EntityComponent.methodGetRenderer()` shorthand getter.
+`EntityComponentButtonPointerLock` (`requestPointerLock()`/checking
+`pointerLockElement` against `renderer.domElement`) is the converted
+consumer — chosen because, unlike `scene`'s candidates, it turned out to be
+the *right* shape on the first check: it has exactly one instantiation in
+the whole codebase (`main.js`'s `"pointerLockButton"` entity), so there was
+no reused-class ambiguity to route around this time.
+
+**Verified, with one real caveat.** `npm run build` clean. A headless
+Chromium test clicked the button and called `requestPointerLock()` through
+the converted `this.methodGetRenderer().domElement` — the call reached the
+browser's real Pointer Lock API (not a `TypeError`/`undefined` failure),
+but Chromium rejected it with `"The root document of this element is not
+valid for pointer lock."` To rule out a regression, the identical test was
+run against the last pushed commit (`bcd401a`, before any `EngineContext`
+work existed at all, `renderer` still passed as a raw hard-wired
+constructor param) via `git stash`/`git stash pop` — the exact same
+rejection occurs there too. This confirms it's a pre-existing limitation of
+requesting pointer lock from an automated/headless browser context, not
+something this conversion introduced; genuine pointer-lock behavior is
+untested by either version's automated suite and would need a real,
+interactive browser to verify.
+
+## `camera`/`cameraPivot` — done too, with two real roadblocks worked through
+
+Unlike `scene`/`renderer`, `camera` didn't have a clean, no-wrinkle consumer
+to pick — every real consumer had a wrinkle, discussed and resolved before
+implementing:
+
+1. **Its main consumer (`EntityComponentCameraControllerFirstPerson`) reads
+   *and mutates* it every single `methodUpdate()` call, not just at
+   construction.** Resolved by caching: `methodInitialize()` now resolves
+   `this.#camera`/`this.#cameraPivot`/`this.#scene` once via
+   `methodGetCamera()`/`methodGetCameraPivot()`/`methodGetScene()`, and
+   every per-frame read/mutation uses the cached field, mirroring how
+   `EntityComponentLightManager` already cached its own sibling lookup.
+   Confirmed safe to cache: the underlying object is only ever mutated in
+   place (rotated, position changed) — `main.js` never constructs a
+   *replacement* camera/cameraPivot object after `initBareMinimum()`, so a
+   cached reference never goes stale.
+2. **`cameraPivot` isn't a Three.js concept, but is tightly tied to `camera`
+   in this project's first-person rig.** Rather than converting `camera`
+   alone and leaving `cameraPivot` as a lingering hard-wired param (a
+   partially-converted, inconsistent-looking constructor), both were added
+   to `EntityComponentEngineContext` together, alongside `scene`, so
+   `EntityComponentCameraControllerFirstPerson`'s constructor needs zero
+   bare-minimum params at all now (`new EntityComponentCameraControllerFirstPerson()`).
+3. **`EntityComponentLightManager` received `camera` through a deliberately
+   generic `sourceReferencePoint` constructor param, not a camera-specific
+   one** — its own doc comment described it as "the source offset is
+   measured from (e.g. the main camera)," implying genericity. Converting
+   this consumer meant choosing between hardcoding "the reference point is
+   always the camera" into a class designed to accept any `THREE.Object3D`,
+   or leaving it hand-wired. Decided (with explicit sign-off, since this
+   class's original generic design was never actually exercised by more
+   than one real usage): adapt `EntityComponentLightManager` itself —
+   `sourceReferencePoint` is no longer a constructor param; `methodInitialize()`
+   now fetches `this.methodGetCamera()` directly and caches it, same as the
+   camera controller. `targetReferencePoint` (the HUD cube component
+   reference) stays a constructor param — it's a real cross-entity
+   component reference, not a bare-minimum Three.js object, and converting
+   it is `TODO.md` item 6.4's separate matter, not touched here.
+
+**Verified.** `npm run build` clean. Two real-browser tests: (1) a single-page
+test exercising mouse-look (`rotateX`/`rotateY` on the newly-cached
+`camera`/`cameraPivot`), WASD movement, and the reset key (`camera.rotation.set(0,0,0)`)
+for 30+ frames — zero console errors, which also exercises
+`EntityComponentLightManager`'s `methodUpdate()` running every one of those
+frames against its newly-cached camera reference; (2) the same 2-tab PeerJS
+connection test used for `scene`, confirming `EntityComponentPlayerNetworkSync`
+(which reads the camera controller's `methodGetPosition()`/
+`methodGetCameraPivotQuaternion()`/`methodGetCameraQuaternion()` getters,
+themselves now backed by the cached fields) still produces correct,
+error-free `transform` messages end-to-end.
+
+## `sceneHUD` — done too, resolving the reused-class problem via subclasses
+
+Unlike `camera`, which sidestepped the reused-class problem entirely
+(`EntityComponentLightManager` was adapted instead of routing through
+`EntityComponentTestCube`/`EntityComponentDirectionalLight`), `sceneHUD`
+couldn't route around it: `EntityComponentTestCubeHUD` (cubeHUD) and the HUD
+sun's `EntityComponentDirectionalLight` instance both genuinely need
+`sceneHUD`, and both underlying classes are also genuinely reused with
+`scene` for other instances (ground/the sun's cube; the world sun).
+
+**Decided approach: an overridable hook method, not a constructor flag.**
+Both `EntityComponentTestCube` and `EntityComponentDirectionalLight` gained
+a `methodGetTargetScene()` method, defaulting to `this.methodGetScene()`,
+called instead of touching `scene` directly. Each class's HUD-specific
+subclass overrides just that one method to return `this.methodGetSceneHUD()`
+instead:
+
+- `EntityComponentTestCubeHUD` already existed (cubeHUD's own subclass) —
+  it just gained the override.
+- `EntityComponentDirectionalLightHUD` is new, created purely to hold this
+  one override, mirroring `EntityComponentTestCubeHUD`'s existing role —
+  `main.js`'s hudSun instantiation now uses it instead of the base
+  `EntityComponentDirectionalLight`.
+
+This was the explicit decision on the subclass-vs-flag question raised
+earlier: subclasses were chosen over a boolean constructor param
+(`{isHUD: true}`) for consistency with the precedent `EntityComponentTestCubeHUD`
+already set, and because HUD-specific components may reasonably grow their
+own HUD-only needs/methods over time that a plain flag wouldn't give room
+for — a real subclass leaves that room open by construction. Ground/the
+sun's cube/the world sun (direct instances of the base classes) needed zero
+changes; only the two HUD subclasses override anything.
+
+**`EntityComponentBackgroundPlane`** (the HUD panel) was the one clean,
+no-roadblock consumer, same shape as `scene`'s/`renderer`'s earlier picks —
+exactly one instantiation, always `sceneHUD`, converted directly with no
+hook needed.
+
+**Verified.** `npm run build` clean. Two real-browser checks: a screenshot
+after loading and looking around confirmed cubeHUD and the HUD panel render
+correctly in `sceneHUD` (matching background color, correct position) with
+zero console errors; a second screenshot looking down at the ground
+confirmed the world scene (ground, correctly lit and shadowed by the world
+sun) still renders correctly through the same `methodGetTargetScene()`
+default path. The 2-tab PeerJS connection test was re-run too, confirming
+remote-player cube spawning (`EntityComponentRemotePlayerManager`, itself
+already converted for `scene`) still works — its now-redundant explicit
+`scene: this.methodGetScene()` param was removed as part of this pass,
+since `EntityComponentTestCube` resolves its own target scene internally by
+default now.
+
+## Still open
+
+Only `cameraHUD` remains unconverted. Nothing else currently receives it as
+a hard-wired constructor param outside `main.js`'s own direct usage (which,
+like `scene`/`renderer`/`camera`'s own direct main.js usage, is out of
+scope — `main.js` already holds the authoritative reference from
+`initBareMinimum()`), so converting it may end up being a non-event, or may
+surface a consumer not yet identified. Worth a fresh survey when it's
+picked up, the same way each of the other five values got one.

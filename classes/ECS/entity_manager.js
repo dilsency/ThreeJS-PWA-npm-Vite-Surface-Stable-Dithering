@@ -66,6 +66,13 @@ export class EntityManager
     {
         return this.#entities[index];
     }
+    methodGetEntityByName(paramName)
+    {
+        // first match wins - same semantics as THREE.Object3D.getObjectByName;
+        // entity name uniqueness is trusted by convention throughout this ECS
+        // (methodAddEntity never checks for collisions), not enforced here
+        return this.#entities.find((iteratorEntity) => iteratorEntity.methodGetName() === paramName) ?? null;
+    }
     methodGetEntitiesWithComponent(paramComponentName, paramEntityNameToExclude)
     {
         const result = [];

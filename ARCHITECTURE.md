@@ -143,7 +143,8 @@ nuanced than "CDN bad, npm good" or vice versa.
 - `MATH_TRICKS.md` — worked, intuition-building explanations of the
   less-obvious math formulae used (or planned) in this codebase — e.g. the
   resettable interpolation-alpha ramp behind `TODO.md` item 7.
-- `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md` — open question (`TODO.md` item
-  6.5): should `scene`/`renderer`/`camera`/etc. get their own `EntityComponent`
-  and be looked up like everything else, or stay a hard-wired exception the
-  way `LIGHT_MANAGER_COUPLING.md`'s single light pairing does?
+- `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md` — `TODO.md` item 6.5/10:
+  `scene`/`renderer`/`camera`/`cameraPivot` are now looked up through a
+  dedicated `EntityComponentEngineContext` instead of hard-wired constructor
+  params (`sceneHUD`/`cameraHUD` still open); also covers when caching a
+  resolved `EngineContext` lookup is safe.

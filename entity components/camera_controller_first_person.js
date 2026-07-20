@@ -100,7 +100,17 @@ export class EntityComponentCameraControllerFirstPersonInput extends EntityCompo
 
 export class EntityComponentCameraControllerFirstPerson extends EntityComponent
 {
-    #params = null;
+    // scene/camera/cameraPivot used to be constructor params - now resolved
+    // once (see methodInitialize()) via EngineContext (see
+    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md) and cached here, since this
+    // component reads and mutates camera/cameraPivot every single
+    // methodUpdate() call - a fresh methodGetCamera()/methodGetCameraPivot()
+    // lookup 60 times/sec would be wasteful, and the cached reference never
+    // goes stale since neither object is ever replaced with a different one
+    // after construction, only mutated in place.
+    #scene = null;
+    #camera = null;
+    #cameraPivot = null;
     #directionForward = null;
     #directionForwardNonvertical = null;
     #directionRight = null;
@@ -108,7 +118,6 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
     constructor(params)
     {
         super(params);
-        this.#params = params;
     }
     get directionForward(){return this.#directionForward;}
     get directionForwardNonvertical(){return this.#directionForwardNonvertical;}
@@ -123,11 +132,15 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
     // yaw/pitch Euler components, which only worked because cameraPivot
     // currently only ever rotates on Y and camera only ever rotates on X
     // (see TODO.md's now-resolved item 3 for the full reasoning).
-    methodGetPosition(){return this.#params.cameraPivot.position;}
-    methodGetCameraPivotQuaternion(){return this.#params.cameraPivot.quaternion;}
-    methodGetCameraQuaternion(){return this.#params.camera.quaternion;}
+    methodGetPosition(){return this.#cameraPivot.position;}
+    methodGetCameraPivotQuaternion(){return this.#cameraPivot.quaternion;}
+    methodGetCameraQuaternion(){return this.#camera.quaternion;}
     methodInitialize()
     {
+        this.#scene = this.methodGetScene();
+        this.#camera = this.methodGetCamera();
+        this.#cameraPivot = this.methodGetCameraPivot();
+
         this.#directionForward = new THREE.Vector3(0,0,-1);
         this.#directionForwardNonvertical = new THREE.Vector3(0,0,-1);
         this.#directionRight = new THREE.Vector3(1,0,0);
@@ -137,7 +150,7 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
         this.methodUpdatePerpendiculars();
 
         // register handlers
-        
+
         this.methodRegisterMessageHandlerWithinEntity('update.position', (paramMessage) => { this.methodHandleUpdatePosition(paramMessage); });
         //this.methodRegisterMessageHandlerWithinEntity('update.rotations', (paramMessage) => { this.methodHandleUpdateRotations(paramMessage); });
     }
@@ -154,8 +167,8 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
         if(componentInstanceInput.keys.reset == true)
         {
             //
-            this.#params.camera.rotation.set(0,0,0);
-            this.#params.cameraPivot.rotation.set(0,0,0);
+            this.#camera.rotation.set(0,0,0);
+            this.#cameraPivot.rotation.set(0,0,0);
             // update perpendiculars
             this.methodUpdatePerpendiculars();
             //
@@ -179,15 +192,15 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
         if(speedX == 0 && speedY == 0){return;}
 
         //
-        this.#params.camera.rotateX(speedY);
-        this.#params.cameraPivot.rotateY(speedX);
+        this.#camera.rotateX(speedY);
+        this.#cameraPivot.rotateY(speedX);
 
 
         // IF we want to broadcast to other components that we have changed rotation
 
         //
-        const resultRotationCamera = new THREE.Quaternion().copy(this.#params.camera.quaternion);
-        const resultRotationCameraPivot = new THREE.Quaternion().copy(this.#params.cameraPivot.quaternion);
+        const resultRotationCamera = new THREE.Quaternion().copy(this.#camera.quaternion);
+        const resultRotationCameraPivot = new THREE.Quaternion().copy(this.#cameraPivot.quaternion);
         // in order to broadcast to other components that we have changed rotation
         this.methodSetRotations(resultRotationCameraPivot, speedX, resultRotationCamera, speedY);
 
@@ -208,7 +221,7 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
 
         // update directionForward
         // with our camera's current direction
-        this.#params.camera.getWorldDirection(this.#directionForward);
+        this.#camera.getWorldDirection(this.#directionForward);
         // we need a version of directionForward
         // that has no vertical component
         this.#directionForwardNonvertical.copy(this.#directionForward);
@@ -216,8 +229,8 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
         this.#directionForwardNonvertical.normalize();
 
         // when will we use the unformatted version of directionRight? idk, but here it is
-        this.#directionRight.crossVectors(this.#params.scene.up, this.#directionForward);
-        this.#directionRightNonvertical.crossVectors(this.#params.scene.up, this.#directionForwardNonvertical);
+        this.#directionRight.crossVectors(this.#scene.up, this.#directionForward);
+        this.#directionRightNonvertical.crossVectors(this.#scene.up, this.#directionForwardNonvertical);
     }
 
     // handlers
@@ -225,12 +238,12 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
     methodHandleUpdatePosition(paramMessage)
     {
         // important to remember that we are sent the entire message, not Just the value
-        this.#params.cameraPivot.position.copy(paramMessage.invokableHandlerValue);
+        this.#cameraPivot.position.copy(paramMessage.invokableHandlerValue);
     }
     methodHandleUpdateRotations(paramMessage)
     {
         return;
-        this.#params.camera.quaternion.copy(paramMessage.invokableHandlerValue.rotationB);
-        this.#params.cameraPivot.quaternion.copy(resultRotationCamera.invokableHandlerValue.rotationA);
+        this.#camera.quaternion.copy(paramMessage.invokableHandlerValue.rotationB);
+        this.#cameraPivot.quaternion.copy(resultRotationCamera.invokableHandlerValue.rotationA);
     }
 }
