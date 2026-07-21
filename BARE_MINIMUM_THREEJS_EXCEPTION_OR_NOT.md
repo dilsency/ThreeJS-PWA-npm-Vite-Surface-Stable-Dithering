@@ -1,17 +1,50 @@
 # Bare-minimum Three.js: exception or not?
 
-Status: **still an open question overall, but the mechanism itself is now
-proven for five of the six values, plus cameraPivot (not a Three.js value,
-but tightly tied to camera in this project).** `scene` (via
-`EntityComponentRemotePlayerManager`), `renderer` (via
-`EntityComponentButtonPointerLock`), `camera`/`cameraPivot` (via
-`EntityComponentCameraControllerFirstPerson`, plus adapting
+## Glossary
+
+Terms as used specifically in this doc — not general OOP definitions.
+Alphabetical.
+
+- **Hook method (hook)** — a method a base class calls *on itself*
+  (`this.methodGetX()`) instead of inlining the logic directly, specifically
+  so a subclass can override it to substitute different behavior at that one
+  point, without touching the base class's private fields (which it
+  structurally can't — see "Hook path"). The base class supplies a default
+  implementation; the subclass only needs to override the hooks it actually
+  wants to change. First introduced as `methodGetTargetScene()` (see
+  "`sceneHUD` — done too" below) and reused for `methodGetShape()`/
+  `methodGetColor1()`/`methodGetColor2()` (see "Player-identity hooks on
+  `EntityComponentTestCube`" below). This is the classic OOP *template
+  method* pattern — a fixed algorithm in the base class, with specific
+  decision points left as calls to overridable methods. Every hook method,
+  in every class that defines or overrides one, is wrapped in a
+  `// #region overridable hook methods` / `// #endregion overridable hook
+  methods` comment pair — see "Marking hook methods" below.
+- **Hook path** — the specific route a value travels through a hook: the
+  base class's shared logic (e.g. `methodInitialize()`) calls `this.methodGetX()`;
+  because method dispatch is polymorphic, `this` may actually be a subclass
+  instance, so the call resolves to whichever class's override actually
+  runs, and *that* return value is what the shared logic uses. E.g. for
+  cubeHUD: `EntityComponentTestCube.methodInitialize()` calls
+  `this.methodGetShape()` → dispatches to `EntityComponentTestCubeHUD`'s
+  override → which self-looks-up `EntityComponentContextLocalPlayerIdentity`
+  and returns its shape index → that's what gets fed into
+  `createFractalMaterialFromSources(...)`. Same shared algorithm either way;
+  only the data source at that one decision point changes per-subclass.
+
+Status: **resolved — the mechanism is proven and all six values are
+converted, plus cameraPivot (not a Three.js value, but tightly tied to
+camera in this project).** `scene` (via `EntityComponentRemotePlayerManager`),
+`renderer` (via `EntityComponentButtonPointerLock`), `camera`/`cameraPivot`
+(via `EntityComponentCameraControllerFirstPerson`, plus adapting
 `EntityComponentLightManager` to fetch `camera` itself instead of receiving
-it as a generic param), and `sceneHUD` (which also resolved the reused-class
-complication, via HUD-specific subclasses) are all converted and verified —
-see "A cheap way to actually find out." Only `cameraHUD` remains; see
-`TODO.md` item 6.5 (the original cluster) and item 10 (this mechanism
-specifically).
+it as a generic param), `sceneHUD` (which also resolved the reused-class
+complication, via HUD-specific subclasses), and finally `cameraHUD` (once
+`TODO.md` item 5.2 gave it a real consumer — see "`cameraHUD`" below) are
+all converted and verified — see "A cheap way to actually find out" and the
+per-value sections that follow it. What's still genuinely open is item
+6.5's `entityManager`, which this conversion deliberately never covered
+(different category — see that item).
 
 ## The question
 
@@ -37,7 +70,7 @@ through the ECS, not through hard-wired references" — the same category of
 exception as `LIGHT_MANAGER_COUPLING.md`'s `componentLightWorld` case, just
 at a much larger scale (one relationship there, nearly every component here).
 
-**The question:** do we build an `EntityComponentEngineContext` (or similarly
+**The question:** do we build an `EntityComponentContextEngine` (or similarly
 named) that owns `scene`/`sceneHUD`/`renderer`/`camera`/`cameraPivot`/
 `cameraHUD`, attach it to one entity constructed first, and have every other
 component fetch what it needs from that component via the ECS's own lookup
@@ -59,14 +92,14 @@ constructor(params) { this.#params = params; /* this.#params.scene used later */
 // converted:
 methodInitialize()
 {
-    const entitiesWithEngineContext = this.methodGetEntitiesWithComponent("EntityComponentEngineContext", null);
-    const componentEngineContext = entitiesWithEngineContext[0]?.methodGetComponent("EntityComponentEngineContext");
+    const entitiesWithEngineContext = this.methodGetEntitiesWithComponent("EntityComponentContextEngine", null);
+    const componentEngineContext = entitiesWithEngineContext[0]?.methodGetComponent("EntityComponentContextEngine");
     const scene = componentEngineContext.methodGetScene();
     // ... use scene as before
 }
 ```
 
-This requires the `EntityComponentEngineContext`-holding entity to be
+This requires the `EntityComponentContextEngine`-holding entity to be
 constructed and added to `entityManager` *before* any consuming entity's own
 `methodInitialize()` runs — achievable, since `main.js` already controls
 construction order and could simply build that entity first. `EntityComponentTestCube`'s
@@ -197,7 +230,7 @@ Once it exists, fetching a specific bare-minimum value is a small
 composition, not a special method of its own:
 
 ```js
-const componentEngineContext = this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext");
+const componentEngineContext = this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine");
 const scene = componentEngineContext.methodGetScene();
 ```
 
@@ -220,11 +253,11 @@ calls:
 ```js
 methodGetScene()
 {
-    return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetScene();
+    return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")?.methodGetScene();
 }
 methodGetRenderer()
 {
-    return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetRenderer();
+    return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")?.methodGetRenderer();
 }
 // ...and methodGetSceneHUD / methodGetCamera / methodGetCameraPivot / methodGetCameraHUD, one each
 ```
@@ -248,7 +281,7 @@ is just a bag of components — so there's nothing to add there without
 speculative bloat.
 
 **A real DRY win, not just convenience.** If `"EngineContext"`/
-`"EntityComponentEngineContext"` were instead repeated inline across every
+`"EntityComponentContextEngine"` were instead repeated inline across every
 consuming component, renaming either string later means finding and fixing
 every call site. Centralizing both literals inside these six getters means
 only `EntityComponent` itself needs to know the actual names — every
@@ -275,7 +308,7 @@ consumer.
 
 **What "caching" means here:** resolving the full lookup chain —
 `this.methodGetEntityByName("EngineContext")`, then
-`.methodGetComponent("EntityComponentEngineContext")`, then the specific
+`.methodGetComponent("EntityComponentContextEngine")`, then the specific
 getter (`.methodGetScene()`, `.methodGetCamera()`, etc.) — exactly once,
 typically inside a component's own `methodInitialize()`, and storing the
 returned reference in a private field. Every later read (in
@@ -313,6 +346,158 @@ reads and mutates them every `methodUpdate()` call; `EntityComponentLightManager
 caches `camera` (via its `sourceReferencePoint` field) the same way, for the
 same reason. See "`camera`/`cameraPivot` — done too" below for both.
 
+## Self-lookup vs. main.js-resolves-and-passes: which consumers should use which
+
+Two genuinely different patterns exist across every `EntityComponentContext*`
+consumer in this codebase, and it took a real mistake (caught and fixed) to
+land on a clear rule for when to use each:
+
+**Pattern A — self-lookup.** The consumer calls
+`this.methodGetEntityByName("X")?.methodGetComponent("Y")` itself (typically
+once, cached in its own `methodInitialize()` — see above), and never
+receives the value through a constructor param at all. This is what the six
+`EngineContext` shorthand getters (`methodGetScene()` etc.) are *for* —
+every one of their callers uses this pattern.
+
+**Pattern B — main.js resolves and passes.** `main.js` fetches the Context
+component itself, calls its getters, and passes the *resolved values* into
+the consumer's constructor params — the consumer never learns the Context
+entity exists at all. `EntityComponentTestCubeHUD` (via the reused
+`EntityComponentTestCube` base) works this way for `size`/`tiltFactor`
+(from `EntityComponentContextHUDLayout`) and `color1`/`color2`/`shape`
+(from `EntityComponentContextLocalPlayerIdentity`).
+
+**The actual criterion — worked out by getting it wrong first.**
+`EntityComponentPlayerNetworkSync` and `EntityComponentRemotePlayerManager`
+were *originally* built using Pattern B too, uniformly with `componentCubeHUD`,
+when `EntityComponentContextLocalPlayerIdentity` was introduced. That was a
+mistake: the reasoning behind Pattern B — "keep the class agnostic of which
+specific Context entity these values came from" — only actually applies to
+`EntityComponentTestCube`/`EntityComponentTestCubeHUD`, because that class
+is *reused* across multiple unrelated roles (the ground, the sun's cube,
+cubeHUD, every remote player's cube). Coupling a reused, generic class to
+one specific entity by name would be the wrong direction of coupling.
+`EntityComponentPlayerNetworkSync`/`EntityComponentRemotePlayerManager`
+aren't that kind of class at all — both are already single-purpose,
+project-specific networking components, and both *already* did their own
+cross-entity/sibling lookups for something else
+(`EntityComponentPeerConnection`) before `LocalPlayerIdentity` ever existed.
+Applying Pattern B to them wasn't protecting anything; it was just
+`main.js` doing work that belonged in a class already fully willing to look
+things up. Caught when asked directly "couldn't this component just get it
+itself?" — corrected to Pattern A for both, which also makes `main.js`
+itself cleaner (fewer resolved-getter calls cluttering its constructor
+calls).
+
+**The rule, stated positively:** use Pattern A (self-lookup) when the
+consumer is already a single-purpose, project-specific component — one
+that either already does cross-entity/sibling lookups for something else,
+or would only ever be instantiated once, for one clear role. Use Pattern B
+(main.js resolves and passes) only when the consumer is a *reused, generic*
+class whose job is unrelated to any specific Context entity — where
+knowing "LocalPlayerIdentity" or "HUDLayout" exists by name would be a real,
+unwanted coupling, not just a convenience choice.
+
+## Player-identity hooks on `EntityComponentTestCube`
+
+`componentCubeHUD` (the one Pattern-B holdout above) was itself converted
+to self-lookup shortly after the rule above was written, once it became
+clear Pattern B was solving a problem `EntityComponentTestCubeHUD` doesn't
+actually have.
+
+**The technical wrinkle.** `EntityComponentTestCube` resolves
+`shape`/`color1`/`color2` synchronously in its *constructor*, into private
+(`#`) fields. Two things block a subclass from just overriding that:
+
+1. JS private fields are genuinely private, not convention-private — a
+   subclass has no way to reach in and set `#shape` on its parent class,
+   unlike (say) Python's single-underscore convention.
+2. A subclass can't self-lookup `EntityComponentContextLocalPlayerIdentity`
+   from its *own* constructor either, because `this.methodGetEntityByName`
+   requires the component to already be attached to its owning `Entity` —
+   and that link isn't established until *after* `new EntityComponentTestCube(...)`
+   returns, when `Entity.methodAddComponentWithName` runs. This is the same
+   reason `methodGetTargetScene()` (the `scene`/`sceneHUD` hook, above) is
+   called from `methodInitialize()` rather than the constructor.
+
+**How the fix solves it.** `EntityComponentTestCube` gained three more
+overridable hooks — `methodGetShape()`/`methodGetColor1()`/`methodGetColor2()`,
+each defaulting to the corresponding private field — and its
+`methodInitialize()` now calls those hooks instead of touching `#shape`/
+`#color1`/`#color2` directly, exactly mirroring the existing
+`methodGetTargetScene()` pattern. `EntityComponentTestCubeHUD` overrides
+all three hooks to read from `EntityComponentContextLocalPlayerIdentity`,
+which it self-looks-up in its own `methodInitialize()` *before* calling
+`super.methodInitialize()` (so the hooks have something to read by the
+time the base class's `methodInitialize()` calls them to build the
+material).
+
+**Why not a separate `EntityComponentTestCubePlayer` superclass.** The
+option on the table was a linear chain — `EntityComponentTestCube` →
+`EntityComponentTestCubePlayer` (self-lookup) → `EntityComponentTestCubeHUD`
+(HUD framing) — so the identity self-lookup would live in its own
+dedicated class rather than directly in `EntityComponentTestCubeHUD`.
+Rejected because `EntityComponentTestCubeHUD` has exactly **one**
+instantiation anywhere in the codebase — `componentCubeHUD` in `main.js` —
+and it is always the local player's own cube; there is no non-HUD
+local-player cube anywhere to give `EntityComponentTestCubePlayer` a
+second consumer (first-person means a player never sees their own body —
+`EntityComponentRemotePlayerManager` explicitly never spawns one for the
+local peer). A superclass that exists solely to be extended by the one
+class that already needs the behavior is an extra layer of indirection
+with no real second use, which runs against this project's own stated
+bias against designing for hypothetical future requirements. If a genuine
+second identity-driven, non-HUD cube ever shows up, the hooks added here
+make lifting the self-lookup out into a shared `EntityComponentTestCubePlayer`
+a small, mechanical refactor rather than a redesign — but there's no
+reason to build that layer speculatively today.
+
+## Marking hook methods: `// #region overridable hook methods`
+
+Every hook method (see "Hook method" in the Glossary above) — in both the
+base class that defines the default and any subclass that overrides it —
+is wrapped in a matching pair of comments:
+
+```js
+// #region overridable hook methods
+
+methodGetTargetScene()
+{
+    return this.methodGetScene();
+}
+
+// #endregion overridable hook methods
+```
+
+These are plain comments, not a build-time directive — nothing parses
+`#region`/`#endregion`, they're purely a convention some editors (VS Code
+among them) recognize for collapsible code folding. The point is
+findability: a hook method looks exactly like any other method at a glance
+(same `methodGetX()` shape as a plain getter), but it means something
+structurally different — it's a point where a base class's behavior is
+*meant* to be swapped out by a subclass, not just incidentally
+overridable because everything in JS technically is. Marking the region
+makes that boundary visible directly in the file, in both the base class
+(here's what's overridable) and the subclass (here's what's actually being
+overridden), rather than relying on doc comments alone to carry that
+information.
+
+**Applied to every current hook method:** `EntityComponentTestCube`/
+`EntityComponentTestCubeHUD`'s `methodGetTargetScene()`/`methodGetShape()`/
+`methodGetColor1()`/`methodGetColor2()` (`entity components/test_objects.js`)
+and `EntityComponentDirectionalLight`/`EntityComponentDirectionalLightHUD`'s
+`methodGetTargetScene()` (`entity components/lighting.js`). Any new hook
+method added to any entity component should be wrapped the same way, in
+every class that defines or overrides it.
+
+The `#region`/`#endregion` convention doesn't stop at hook methods — every
+other pre-existing informal section label across `entity components/` and
+`classes/ECS/` (`// getters`, `// setters`, `// lifecycle`, `// construct`,
+etc.) is wrapped the same way now too. See `NAMING_CONVENTIONS.md`'s
+"Marking existing code sections" section for that broader sweep, the
+region-boundary rule used, and why this section stays scoped to hook
+methods specifically rather than covering that too.
+
 ## Ensuring EngineContext initializes before everything else
 
 **Decided: give it its own dedicated init step** (see below) — the
@@ -329,7 +514,7 @@ in `main.js` — there's no race condition to manage, only "whichever line
 runs first, runs first." (The one exception anywhere in this codebase: a
 component whose *own* `methodInitialize()` is explicitly `async`, like
 `EntityComponentTestCube` awaiting a texture/shader fetch — see below for
-why `EntityComponentEngineContext` needs to avoid this.)
+why `EntityComponentContextEngine` needs to avoid this.)
 
 **Decided: a dedicated init step, not "the first few lines of
 `initEntityComponents()`".** Add a new `initEngineContext()` function,
@@ -338,7 +523,7 @@ called in `init()` between `initBareMinimum()` and `initEntityComponents()`:
 ```js
 initBareMinimum();
 initECS();
-initEngineContext();   // new - builds the "EngineContext" entity + EntityComponentEngineContext
+initEngineContext();   // new - builds the "EngineContext" entity + EntityComponentContextEngine
 initEntityComponents();
 ```
 
@@ -351,7 +536,7 @@ is worth the one extra named function.
 
 **For consideration, not decided:**
 
-- **`EntityComponentEngineContext` should stay strictly synchronous** — no
+- **`EntityComponentContextEngine` should stay strictly synchronous** — no
   `async methodInitialize()`, no awaited resource loads. This is the actual
   invariant the "first in source order = ready" guarantee above depends on.
   It's easy to keep, since this component only ever stashes already-existing
@@ -386,7 +571,7 @@ deviation from the plan above:
 - `EntityManager.methodGetEntityByName(paramName)` (`classes/ECS/entity_manager.js`),
   delegated through `Entity`/`EntityComponent` the same way
   `methodGetEntitiesWithComponent` already is.
-- A minimal `EntityComponentEngineContext` (`entity components/engine_context.js`)
+- A minimal `EntityComponentContextEngine` (`entity components/context/context_engine.js`)
   holding just `scene` for now, with a deliberately synchronous
   `methodInitialize()` (see "Ensuring EngineContext initializes before
   everything else" above).
@@ -403,7 +588,7 @@ need different scenes (`EntityComponentTestCube` backs the ground/sun-cube
 with `scene` but cubeHUD with `sceneHUD`; `EntityComponentDirectionalLight`
 backs the world sun with `scene` but the HUD sun with `sceneHUD`). Converting
 either class outright would've broken its `sceneHUD` instantiations, since
-`EntityComponentEngineContext` only holds `scene` at this stage. Converted
+`EntityComponentContextEngine` only holds `scene` at this stage. Converted
 `EntityComponentRemotePlayerManager` instead — it has exactly one
 instantiation in the whole codebase, and it only ever means the world
 `scene`, so there's no ambiguity to work around.
@@ -417,7 +602,7 @@ correctly at runtime, not just at build time.
 
 ## `renderer` — done too
 
-Converted next, same pattern: `EntityComponentEngineContext` now also holds
+Converted next, same pattern: `EntityComponentContextEngine` now also holds
 `renderer` (set in the same synchronous `methodInitialize()`), with a
 matching `EntityComponent.methodGetRenderer()` shorthand getter.
 `EntityComponentButtonPointerLock` (`requestPointerLock()`/checking
@@ -463,7 +648,7 @@ implementing:
    in this project's first-person rig.** Rather than converting `camera`
    alone and leaving `cameraPivot` as a lingering hard-wired param (a
    partially-converted, inconsistent-looking constructor), both were added
-   to `EntityComponentEngineContext` together, alongside `scene`, so
+   to `EntityComponentContextEngine` together, alongside `scene`, so
    `EntityComponentCameraControllerFirstPerson`'s constructor needs zero
    bare-minimum params at all now (`new EntityComponentCameraControllerFirstPerson()`).
 3. **`EntityComponentLightManager` received `camera` through a deliberately
@@ -545,12 +730,47 @@ already converted for `scene`) still works — its now-redundant explicit
 since `EntityComponentTestCube` resolves its own target scene internally by
 default now.
 
-## Still open
+## `cameraHUD` — done, once item 5.2 gave it a real consumer
 
-Only `cameraHUD` remains unconverted. Nothing else currently receives it as
-a hard-wired constructor param outside `main.js`'s own direct usage (which,
-like `scene`/`renderer`/`camera`'s own direct main.js usage, is out of
-scope — `main.js` already holds the authoritative reference from
-`initBareMinimum()`), so converting it may end up being a non-event, or may
-surface a consumer not yet identified. Worth a fresh survey when it's
-picked up, the same way each of the other five values got one.
+Originally surveyed as having **no consumer at all** — unlike the other
+five values, no `EntityComponent` anywhere received `cameraHUD` as a
+hard-wired constructor param; every real usage lived inside `main.js`
+itself, mostly in `computeCubeHUDLayout()` (the geometry function solving
+cubeHUD's yaw correction and the HUD panel's fit via
+`cameraHUD.project()`/`.unproject()`/`.lookAt()`), which was itself a bare
+closure, not an `EntityComponent`. So `cameraHUD`'s conversion was never
+blocked by a technical roadblock like `scene`'s reused-class problem or
+`camera`'s per-frame-mutation/generic-param issues — it was gated on a
+*sequencing* dependency: `computeCubeHUDLayout()` needed to become a real
+component first (`TODO.md` item 5.2).
+
+**That happened.** `computeCubeHUDLayout()` is now
+`EntityComponentContextHUDLayout.methodComputeLayout()`
+(`entity components/context/context_hud_layout.js`), attached to the "hudPanel"
+entity *before* `EntityComponentTestCubeHUD`/`EntityComponentBackgroundPlane`
+(both need its output as constructor params). `EntityComponentContextEngine`
+now also holds `cameraHUD`, with a matching
+`EntityComponent.methodGetCameraHUD()`; the new component fetches and
+caches it once in its own `methodInitialize()` (it's called on demand — at
+construction, and again by the live alignment-cycling tuning button — not
+every frame, but the reference never changes regardless, so caching once
+is still the right call per "Caching a resolved lookup is fine" above).
+
+The constants `computeCubeHUDLayout()` depended on (`cubeHUDSize`,
+`cubeHUDBaseOffset`, `cubeHUDTiltFactor`, the `panelInset*Px` values, etc.)
+moved into the component as private fields alongside it, with
+`methodGetSize()`/`methodGetTiltFactor()`/`methodGetTiltRadians()` getters
+for the two remaining external readers (`EntityComponentTestCubeHUD`'s own
+constructor params, and the tuning panel's `applyTuning()`).
+`HUDCubeHorizontalAlignmentEnum`/`HUDPanelYawBehaviorEnum` are now named
+exports from the component's file rather than `main.js` locals.
+
+**Verified.** `npm run build` clean. A screenshot of the default layout
+matched the pre-move screenshots pixel-for-pixel in position/shape,
+confirming the math transcribed correctly rather than just "didn't throw."
+Cycling the tuning panel's alignment button through all three states
+(LEFT → RIGHT → CENTER → back to LEFT) repositioned the cube/panel
+correctly at each step with zero console errors, exercising both branches
+of the iterative corner-projection solve plus the CENTER default. A 2-tab
+PeerJS connection test confirmed nothing multiplayer-related regressed from
+touching `entityHUD`'s construction order.

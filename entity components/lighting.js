@@ -7,20 +7,26 @@ import {EntityComponent} from "../classes/ECS/entity_component.js";
 //
 export class EntityComponentDirectionalLight extends EntityComponent
 {
-    // bare minimum
+    // #region bare minimum
+
     #params = null;
 
     //
     #light = null;
 
-    // construct
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
         this.#params = params;
     }
 
-    // lifecycle
+    // #endregion construct
+
+    // #region lifecycle
 
     methodInitialize()
     {
@@ -60,9 +66,15 @@ export class EntityComponentDirectionalLight extends EntityComponent
     {
     }
 
-    // getters
+    // #endregion lifecycle
+
+    // #region getters
 
     methodGetLight(){return this.#light;}
+
+    // #endregion getters
+
+    // #region overridable hook methods
 
     // Which scene this light belongs in - defaults to the world scene.
     // EntityComponentDirectionalLight is reused for both the world sun and
@@ -74,6 +86,8 @@ export class EntityComponentDirectionalLight extends EntityComponent
     {
         return this.methodGetScene();
     }
+
+    // #endregion overridable hook methods
 }
 
 // HUD variant of EntityComponentDirectionalLight - exists purely to override
@@ -84,10 +98,14 @@ export class EntityComponentDirectionalLight extends EntityComponent
 // chosen here over a constructor flag.
 export class EntityComponentDirectionalLightHUD extends EntityComponentDirectionalLight
 {
+    // #region overridable hook methods
+
     methodGetTargetScene()
     {
         return this.methodGetSceneHUD();
     }
+
+    // #endregion overridable hook methods
 }
 
 // Keeps a "follower" EntityComponentDirectionalLight (e.g. one living in sceneHUD)
@@ -125,7 +143,8 @@ export class EntityComponentDirectionalLightHUD extends EntityComponentDirection
 // converting it is a separate matter (see TODO.md item 6.4).
 export class EntityComponentLightManager extends EntityComponent
 {
-    // bare minimum
+    // #region bare minimum
+
     #params = null;
 
     //
@@ -141,7 +160,10 @@ export class EntityComponentLightManager extends EntityComponent
     #scratchTargetReferenceWorldPos = null;
     #scratchOffset = null;
 
-    // construct
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
@@ -169,7 +191,9 @@ export class EntityComponentLightManager extends EntityComponent
         this.#scratchOffset = new THREE.Vector3();
     }
 
-    // lifecycle
+    // #endregion construct
+
+    // #region lifecycle
 
     methodInitialize()
     {
@@ -229,4 +253,6 @@ export class EntityComponentLightManager extends EntityComponent
         target.position.copy(this.#scratchTargetReferenceWorldPos).add(this.#scratchOffset);
         target.target.position.copy(this.#scratchTargetReferenceWorldPos);
     }
+
+    // #endregion lifecycle
 }

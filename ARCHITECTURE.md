@@ -143,8 +143,9 @@ nuanced than "CDN bad, npm good" or vice versa.
 - `MATH_TRICKS.md` — worked, intuition-building explanations of the
   less-obvious math formulae used (or planned) in this codebase — e.g. the
   resettable interpolation-alpha ramp behind `TODO.md` item 7.
-- `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md` — `TODO.md` item 6.5/10:
-  `scene`/`renderer`/`camera`/`cameraPivot` are now looked up through a
-  dedicated `EntityComponentEngineContext` instead of hard-wired constructor
-  params (`sceneHUD`/`cameraHUD` still open); also covers when caching a
-  resolved `EngineContext` lookup is safe.
+- `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md` — `TODO.md` item 6.5/10, done:
+  all six of `scene`/`sceneHUD`/`renderer`/`camera`/`cameraPivot`/`cameraHUD`
+  are now looked up through a dedicated `EntityComponentContextEngine`
+  instead of hard-wired constructor params (`entityManager` deliberately
+  excluded, still open); also covers when caching a resolved `EngineContext`
+  lookup is safe.

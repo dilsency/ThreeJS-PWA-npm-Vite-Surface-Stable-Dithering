@@ -223,8 +223,9 @@ its own payload shape. Known types so far:
 - `{type: "roster", peerIds: [...]}` — mesh formation, above.
 - `{type: "identity", shapeIndex, colorIndex1, colorIndex2}` (implemented) —
   the local player's cubeHUD shape (0-9), `colorIndex1` into
-  `playerColorPaletteBody` (base/body color) and `colorIndex2` into
-  `playerColorPaletteDither` (dither color) - two separate arrays (`main.js`),
+  `colorPaletteBody` (base/body color) and `colorIndex2` into
+  `colorPaletteDither` (dither color) - two separate arrays owned by
+  `EntityComponentContextLocalPlayerIdentity` (`entity components/context/context_local_player_identity.js`),
   each holding HSL color strings (`THREE.Color` parses `"hsl(h, s%, l%)"`
   directly, same as it does hex strings, so no conversion code was needed).
   Sent as raw indices, not resolved color strings, since every client runs
@@ -548,14 +549,17 @@ correctly; there was just nothing giving two independent local sessions
 distinct starting points.
 
 Fixed in `main.js` by deriving a random local spawn X *and* Z from the
-`ground` entity's own actual extent, computed from the same `groundSize`/
-`groundPositionOffset` values used to construct the ground's
-`EntityComponentTestCube` (not the ground's live `THREE.Mesh`, since that's
-built asynchronously and isn't guaranteed to exist yet at this point in
-`initEntityComponents()`): `groundMinX`/`groundMaxX` from
-`groundPositionOffset.x ∓ groundSize.x/2` (and the same shape for Z), then
-`localPlayerStartX`/`localPlayerStartZ` each rolled uniformly and
-independently between their respective min/max. Y stays fixed at `0` -
+`ground` entity's own actual extent. That footprint (`groundSize`/
+`groundPositionOffset`, plus the derived min/max bounds) now lives on
+`EntityComponentContextWorldLayout` (`entity components/context/context_world_layout.js`,
+`TODO.md` item 6.2) rather than as `main.js` locals — the same values feed
+both the ground's own `EntityComponentTestCube` construction and
+`methodGetRandomSpawnPositionXZ()`, so the two can never drift out of sync.
+Computed from these construction-time values rather than the ground's live
+`THREE.Mesh`, since that's built asynchronously and isn't guaranteed to
+exist yet at this point in `initEntityComponents()`. The X and Z bounds
+(`groundPositionOffset.x/z ∓ groundSize.x/z / 2`) are each rolled uniformly
+and independently. Y stays fixed at `0` -
 randomizing across the ground's full X/Z footprint is sufficient to keep two
 players from colocating in the common case and keeps everyone provably
 standing on the ground (by construction, since both ranges come directly

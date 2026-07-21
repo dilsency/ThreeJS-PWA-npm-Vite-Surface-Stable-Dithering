@@ -2,16 +2,28 @@
 
 Context: `main.js`'s `sceneHUD` setup builds `cubeHUD` (via
 `EntityComponentTestCubeHUD`) as a stand-in for a person model that will
-eventually replace it — see the comment on `cubeHUDBaseOffset` in `main.js`
-for why it's deliberately positioned low enough that most of it renders below
-the visible viewport (mimicking a first-person view of your own body, visible
-only from roughly mid-thigh up). This doc covers everything about how that
-cube is positioned and oriented, and the live tuning tool built to dial it in
-by eye. For the separate question of how the backdrop panel fits around
-whatever the cube's current position/size/rotation happen to be, see
-`HUD_PANEL_CUBE_FITTING.md` — that doc's projection-based approach is what
-lets everything described here (alignment, size, tilt) change without the
-panel's fit needing to be hand-adjusted to match.
+eventually replace it — see the comment on `cubeHUDBaseOffset` in
+`entity components/context/context_hud_layout.js` for why it's deliberately
+positioned low enough that most of it renders below the visible viewport
+(mimicking a first-person view of your own body, visible only from roughly
+mid-thigh up). This doc covers everything about how that cube is positioned
+and oriented, and the live tuning tool built to dial it in by eye. For the
+separate question of how the backdrop panel fits around whatever the cube's
+current position/size/rotation happen to be, see `HUD_PANEL_CUBE_FITTING.md`
+— that doc's projection-based approach is what lets everything described
+here (alignment, size, tilt) change without the panel's fit needing to be
+hand-adjusted to match.
+
+**Note on `computeCubeHUDLayout` references below:** this doc predates
+`TODO.md` item 5.2's conversion — `computeCubeHUDLayout()` used to be a bare
+closure in `main.js`, and is now `EntityComponentContextHUDLayout.methodComputeLayout()`
+(`entity components/context/context_hud_layout.js`), moved (not rewritten) since it's
+read by two sibling components (`EntityComponentTestCubeHUD`/
+`EntityComponentBackgroundPlane`), not owned by either — see
+`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md` and `NAMING_CONVENTIONS.md`'s
+"Entity-component naming families" section. Every reasoning/comment this doc
+quotes from it still applies unchanged; only its location and the fact that
+it's now a method, not a bare function, have changed.
 
 ## Horizontal alignment
 

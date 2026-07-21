@@ -29,7 +29,7 @@ export class EntityManager
         this.#idCounter = 0;
     }
 
-    // adders
+    // #region adders
 
     methodAddEntity(paramEntity, paramEntityName)
     {
@@ -51,7 +51,9 @@ export class EntityManager
         paramEntity.methodInitialize();
     }
 
-    // removers
+    // #endregion adders
+
+    // #region removers
 
     methodRemoveEntity(paramEntity)
     {
@@ -60,7 +62,9 @@ export class EntityManager
         this.#entities.splice(index, 1);
     }
 
-    // getters
+    // #endregion removers
+
+    // #region getters
 
     methodGetEntityByIndex(index)
     {
@@ -98,7 +102,9 @@ export class EntityManager
         return result;
     }
 
-    // lifecycle
+    // #endregion getters
+
+    // #region lifecycle
 
     methodUpdate(timeElapsed, timeDelta)
     {
@@ -130,7 +136,9 @@ export class EntityManager
         //}
     }
 
-    // "helpers" / generators
+    // #endregion lifecycle
+
+    // #region "helpers" / generators
 
     methodGenerateName()
     {
@@ -138,4 +146,6 @@ export class EntityManager
         this.#idCounter++;
         return name;
     }
+
+    // #endregion "helpers" / generators
 }

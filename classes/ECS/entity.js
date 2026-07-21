@@ -60,14 +60,16 @@ export class Entity
         this.#onlyOnce = false;
     }
 
-    // lifecycle
+    // #region lifecycle
 
     methodInitialize()
     {
         //console.log("entity initialized (name: "+ this.#name +")");
     }
 
-    // getters
+    // #endregion lifecycle
+
+    // #region getters
 
     methodGetEntityByName(paramName)
     {
@@ -133,7 +135,9 @@ export class Entity
     get Position(){return this.#position;}
     get Rotation(){return {rotationA: this.#rotationA, rotationB: rotationB};}
 
-    // setters
+    // #endregion getters
+
+    // #region setters
 
     // could we use the set keyword for this?
     // probably not, since our properties are private
@@ -167,7 +171,9 @@ export class Entity
         });
     }
 
-    // adders
+    // #endregion setters
+
+    // #region adders
 
     methodAddComponent(paramComponent)
     {
@@ -215,7 +221,9 @@ export class Entity
         paramComponent.methodInitialize();
     }
 
-    // registers
+    // #endregion adders
+
+    // #region registers
 
     methodRegisterMessageHandlerWithinEntity(paramInvokableHandlerName, paramInvokableHandlerValue)
     {
@@ -236,7 +244,9 @@ export class Entity
         this.#invokableHandlers[paramInvokableHandlerName].push(paramInvokableHandlerValue);
     }
 
-    // lifecycle
+    // #endregion registers
+
+    // #region lifecycle
 
     methodUpdate(timeElapsed, timeDelta)
     {
@@ -306,4 +316,6 @@ export class Entity
             iteratorEntity.methodSendMessageWithinEntity(paramMessage);
         }
     }
+
+    // #endregion lifecycle
 }

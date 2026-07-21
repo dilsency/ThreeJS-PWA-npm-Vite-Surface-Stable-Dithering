@@ -85,7 +85,7 @@ export class EntityComponentPlayerController extends EntityComponent
         this.#params = params;
     }
 
-    // lifecycle
+    // #region lifecycle
 
     methodInitialize(){}
 
@@ -160,4 +160,6 @@ export class EntityComponentPlayerController extends EntityComponent
 
 
     }
+
+    // #endregion lifecycle
 }

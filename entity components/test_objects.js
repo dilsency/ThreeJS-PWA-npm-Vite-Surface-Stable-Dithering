@@ -51,7 +51,8 @@ function getCachedTexture(textureFile)
 //
 export class EntityComponentTestCube extends EntityComponent
 {
-    // bare minimum
+    // #region bare minimum
+
     #params = null;
 
     //
@@ -71,7 +72,10 @@ export class EntityComponentTestCube extends EntityComponent
     //
     #nameLastLetterAsInt = null;
 
-    // construct
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
@@ -124,7 +128,9 @@ export class EntityComponentTestCube extends EntityComponent
         }
     }
 
-     // lifecycle
+    // #endregion construct
+
+     // #region lifecycle
 
     async methodInitialize()
     {
@@ -145,7 +151,7 @@ export class EntityComponentTestCube extends EntityComponent
             const texture = await getCachedTexture(this.#textureFile);
             const { vertexShader, fragmentShader } = await getCachedShaderSources();
 
-            const material = createFractalMaterialFromSources(vertexShader, fragmentShader, { map: texture, level: 3, shape: this.#shape, lighting: this.#lighting, debugNormals: this.#debugNormals, color1: this.#color1, color2: this.#color2, color1Texture: this.#color1Texture, color2BlendTexture: this.#color2BlendTexture });
+            const material = createFractalMaterialFromSources(vertexShader, fragmentShader, { map: texture, level: 3, shape: this.methodGetShape(), lighting: this.#lighting, debugNormals: this.#debugNormals, color1: this.methodGetColor1(), color2: this.methodGetColor2(), color1Texture: this.#color1Texture, color2BlendTexture: this.#color2BlendTexture });
 
             this.#cube = new THREE.Mesh(geometry, material);
             this.#cube.castShadow = true;
@@ -170,9 +176,15 @@ export class EntityComponentTestCube extends EntityComponent
         this.#cube.rotation.y += timeDelta * (this.#nameLastLetterAsInt % 2 == 0 ? 1 : -1);
     }
 
-    // getters
+    // #endregion lifecycle
+
+    // #region getters
 
     methodGetCube(){return this.#cube;}
+
+    // #endregion getters
+
+    // #region overridable hook methods
 
     // Which scene this cube's mesh belongs in - defaults to the world scene.
     // EntityComponentTestCube is reused for both world cubes (ground, the
@@ -186,12 +198,38 @@ export class EntityComponentTestCube extends EntityComponent
         return this.methodGetScene();
     }
 
-    // handlers
+    // Shape/color1/color2 - overridden by EntityComponentTestCubeHUD to
+    // resolve the local player's identity instead of reading the raw
+    // constructor params. Same reasoning as methodGetTargetScene() above:
+    // a reused class exposes an overridable hook rather than baking
+    // one-specific-consumer's data source into itself. See
+    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md's "Player-identity hooks on
+    // EntityComponentTestCube" section.
+    methodGetShape()
+    {
+        return this.#shape;
+    }
+
+    methodGetColor1()
+    {
+        return this.#color1;
+    }
+
+    methodGetColor2()
+    {
+        return this.#color2;
+    }
+
+    // #endregion overridable hook methods
+
+    // #region handlers
 
     methodHandleUpdatePosition(paramMessage)
     {
         this.#cube.position.copy(paramMessage.invokableHandlerValue);
     }
+
+    // #endregion handlers
 }
 
 //
@@ -201,7 +239,16 @@ export class EntityComponentTestCubeHUD extends EntityComponentTestCube
     #tiltFactor = 0;
     #yawRadians = 0;
 
-    // construct
+    // EntityComponentTestCubeHUD has exactly one instantiation in the whole
+    // codebase - cubeHUD, always representing the local player - so the
+    // self-lookup lives directly here rather than in a separate
+    // EntityComponentTestCubePlayer superclass. See
+    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md's "Player-identity hooks on
+    // EntityComponentTestCube" section for the fuller reasoning.
+    #componentLocalPlayerIdentity = null;
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
@@ -221,7 +268,9 @@ export class EntityComponentTestCubeHUD extends EntityComponentTestCube
         }
     }
 
-    // getters
+    // #endregion construct
+
+    // #region overridable hook methods
 
     // cubeHUD lives in sceneHUD, not the world scene - see
     // EntityComponentTestCube.methodGetTargetScene()'s comment.
@@ -230,10 +279,35 @@ export class EntityComponentTestCubeHUD extends EntityComponentTestCube
         return this.methodGetSceneHUD();
     }
 
-     // lifecycle
+    // Resolved from the cross-entity EntityComponentContextLocalPlayerIdentity
+    // (self-looked-up in methodInitialize() below) instead of from
+    // constructor params - see the class-level comment above.
+    methodGetShape()
+    {
+        return this.#componentLocalPlayerIdentity.methodGetShapeIndex();
+    }
+
+    methodGetColor1()
+    {
+        return this.#componentLocalPlayerIdentity.methodGetColor1();
+    }
+
+    methodGetColor2()
+    {
+        return this.#componentLocalPlayerIdentity.methodGetColor2();
+    }
+
+    // #endregion overridable hook methods
+
+     // #region lifecycle
 
     async methodInitialize()
     {
+        // Resolved before super.methodInitialize() runs, since that's what
+        // reads methodGetShape()/methodGetColor1()/methodGetColor2() to
+        // build the material.
+        this.#componentLocalPlayerIdentity = this.methodGetEntityByName("LocalPlayerIdentity")?.methodGetComponent("EntityComponentContextLocalPlayerIdentity");
+
         await super.methodInitialize();
 
         // Crude approximation of "face the camera": rather than an exact lookAt (which
@@ -251,12 +325,15 @@ export class EntityComponentTestCubeHUD extends EntityComponentTestCube
         // HUD_PANEL_CUBE_FITTING.md.
         this.methodGetCube().rotation.y += this.#yawRadians;
     }
+
+    // #endregion lifecycle
 }
 
 //
 export class EntityComponentBackgroundPlane extends EntityComponent
 {
-    // bare minimum
+    // #region bare minimum
+
     #params = null;
 
     //
@@ -266,7 +343,10 @@ export class EntityComponentBackgroundPlane extends EntityComponent
     #color = 0x87ceeb; // sky blue
     #textureFile = null;
 
-    // construct
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
@@ -291,7 +371,9 @@ export class EntityComponentBackgroundPlane extends EntityComponent
         }
     }
 
-    // lifecycle
+    // #endregion construct
+
+    // #region lifecycle
 
     async methodInitialize()
     {
@@ -346,36 +428,48 @@ export class EntityComponentBackgroundPlane extends EntityComponent
     {
     }
 
-    // getters
+    // #endregion lifecycle
+
+    // #region getters
 
     methodGetPlane(){return this.#plane;}
 
-    // handlers
+    // #endregion getters
+
+    // #region handlers
 
     methodHandleUpdatePosition(paramMessage)
     {
         this.#plane.position.copy(paramMessage.invokableHandlerValue);
     }
+
+    // #endregion handlers
 }
 
 //
 export class EntityComponentButtonPointerLock extends EntityComponent
 {
-    // bare minimum
+    // #region bare minimum
+
     #params = null;
 
     //
     #elementButton = null;
     #isVisibleButton = true;
 
-    // construct
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
         this.#params = params;
     }
 
-     // lifecycle
+    // #endregion construct
+
+     // #region lifecycle
 
     methodInitialize()
     {
@@ -437,4 +531,6 @@ export class EntityComponentButtonPointerLock extends EntityComponent
 
         return !res;
     }
+
+    // #endregion lifecycle
 }

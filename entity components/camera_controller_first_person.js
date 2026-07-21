@@ -141,6 +141,17 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
         this.#camera = this.methodGetCamera();
         this.#cameraPivot = this.methodGetCameraPivot();
 
+        // Local player spawn position - self-looked-up rather than received
+        // via constructor params, the same self-lookup shape as
+        // camera/cameraPivot/scene above, just one level further out (this
+        // component doesn't need to know spawn positions come from ground
+        // bounds at all - EntityComponentContextPlayerInitialization owns
+        // that). See NAMING_CONVENTIONS.md's "A single consumer is fine,
+        // conditionally" section and TODO.md item 6's sub-item 6.
+        const componentPlayerInitialization = this.methodGetEntityByName("PlayerInitialization")?.methodGetComponent("EntityComponentContextPlayerInitialization");
+        const spawnPosition = componentPlayerInitialization.methodGetSpawnPosition();
+        this.#cameraPivot.position.set(spawnPosition.x, 0, spawnPosition.z);
+
         this.#directionForward = new THREE.Vector3(0,0,-1);
         this.#directionForwardNonvertical = new THREE.Vector3(0,0,-1);
         this.#directionRight = new THREE.Vector3(1,0,0);
@@ -233,7 +244,7 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
         this.#directionRightNonvertical.crossVectors(this.#scene.up, this.#directionForwardNonvertical);
     }
 
-    // handlers
+    // #region handlers
 
     methodHandleUpdatePosition(paramMessage)
     {
@@ -246,4 +257,6 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
         this.#camera.quaternion.copy(paramMessage.invokableHandlerValue.rotationB);
         this.#cameraPivot.quaternion.copy(resultRotationCamera.invokableHandlerValue.rotationA);
     }
+
+    // #endregion handlers
 }

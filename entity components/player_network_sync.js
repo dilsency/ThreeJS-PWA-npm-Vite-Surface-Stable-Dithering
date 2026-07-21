@@ -7,7 +7,8 @@ import {EntityComponent} from "../classes/ECS/entity_component.js";
 // and broadcasts it to every connected peer at a throttled rate, via
 // EntityComponentPeerConnection (found by cross-entity lookup, since it lives
 // on the separate "multiplayer" entity). Also sends this player's identity
-// (cubeHUD shape/color indices, chosen once at startup in main.js) to each
+// (cubeHUD shape/color indices, held by the cross-entity
+// EntityComponentContextLocalPlayerIdentity) to each
 // new connection exactly once, since - unlike position/facing - it never
 // changes for the lifetime of a connection. Outbound-only: never touches
 // incoming messages or remote representations - that's
@@ -15,7 +16,8 @@ import {EntityComponent} from "../classes/ECS/entity_component.js";
 // MULTIPLAYER_TOPOLOGY_AND_SYNC.md for why these stay separate components.
 export class EntityComponentPlayerNetworkSync extends EntityComponent
 {
-    // bare minimum
+    // #region bare minimum
+
     #params = null;
 
     //
@@ -25,7 +27,18 @@ export class EntityComponentPlayerNetworkSync extends EntityComponent
     //
     #identitySentToIds = new Set();
 
-    // construct
+    // Looked up itself (cross-entity, cached once) rather than received via
+    // constructor params - this class already does its own cross-entity
+    // lookup for EntityComponentPeerConnection below, so this is consistent
+    // with its existing shape, not a new pattern. See
+    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md's "Self-lookup vs.
+    // main.js-resolves-and-passes" section for the fuller reasoning.
+    #componentLocalPlayerIdentity = null;
+
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
@@ -33,10 +46,13 @@ export class EntityComponentPlayerNetworkSync extends EntityComponent
         this.#sendIntervalSeconds = this.#params.sendIntervalSeconds ?? (1 / 18); // ~18Hz, within the 15-20/sec target
     }
 
-    // lifecycle
+    // #endregion construct
+
+    // #region lifecycle
 
     methodInitialize()
     {
+        this.#componentLocalPlayerIdentity = this.methodGetEntityByName("LocalPlayerIdentity")?.methodGetComponent("EntityComponentContextLocalPlayerIdentity");
     }
 
     methodUpdate(timeElapsed, timeDelta)
@@ -56,9 +72,9 @@ export class EntityComponentPlayerNetworkSync extends EntityComponent
             if(this.#identitySentToIds.has(peerId)){continue;}
             componentPeerConnection.methodSendToId(peerId, {
                 type: "identity",
-                shapeIndex: this.#params.shapeIndex,
-                colorIndex1: this.#params.colorIndex1,
-                colorIndex2: this.#params.colorIndex2,
+                shapeIndex: this.#componentLocalPlayerIdentity.methodGetShapeIndex(),
+                colorIndex1: this.#componentLocalPlayerIdentity.methodGetColorIndex1(),
+                colorIndex2: this.#componentLocalPlayerIdentity.methodGetColorIndex2(),
             });
             this.#identitySentToIds.add(peerId);
         }
@@ -87,4 +103,6 @@ export class EntityComponentPlayerNetworkSync extends EntityComponent
             cameraQuaternion: {x: cameraQuaternion.x, y: cameraQuaternion.y, z: cameraQuaternion.z, w: cameraQuaternion.w},
         });
     }
+
+    // #endregion lifecycle
 }

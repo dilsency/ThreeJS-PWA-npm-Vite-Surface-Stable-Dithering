@@ -15,7 +15,7 @@ same class):** this doc is entirely about `source`/`#sourceLightComponent`
 (`componentLightWorld`), which is still a direct reference, unconverted, as
 described below. The *other* hand-wired field this class used to take,
 `sourceReferencePoint` (always the world camera in practice), has since been
-converted to a cached `EntityComponentEngineContext` lookup
+converted to a cached `EntityComponentContextEngine` lookup
 (`this.methodGetCamera()`, resolved once in `methodInitialize()`) — see
 `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`. That was a different kind of
 value (a bare-minimum Three.js singleton, not a specific other entity's

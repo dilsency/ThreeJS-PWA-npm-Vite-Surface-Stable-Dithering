@@ -16,7 +16,8 @@ export class EntityComponent
         this.#parent = null;
     }
 
-    // getters
+    // #region getters
+
     methodGetEntityByName(paramName)
     {
         return this.#parent.methodGetEntityByName(paramName);
@@ -32,35 +33,38 @@ export class EntityComponent
     methodGetParent(){return this.#parent;}
 
     // getters - shorthand for bare-minimum Three.js state owned by the
-    // "EngineContext" entity's EntityComponentEngineContext - see
-    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md. `scene`/`sceneHUD`/`renderer`/
-    // `camera`/`cameraPivot` exist so far; add `methodGetCameraHUD` the same
-    // way once EntityComponentEngineContext grows to hold it. None of these
-    // cache the lookup itself - a per-frame consumer should resolve once in
-    // its own methodInitialize() and stash the result, the way
-    // EntityComponentCameraControllerFirstPerson and
-    // EntityComponentLightManager both already do, rather than calling
+    // "EngineContext" entity's EntityComponentContextEngine - see
+    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md and NAMING_CONVENTIONS.md
+    // (the "EntityComponentContext*" naming family). All six bare-minimum
+    // values are covered now. None of these cache the lookup itself - a
+    // per-frame consumer should resolve once in its own methodInitialize()
+    // and stash the result, the way EntityComponentCameraControllerFirstPerson
+    // and EntityComponentLightManager both already do, rather than calling
     // these fresh every frame.
 
     methodGetScene()
     {
-        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetScene();
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")?.methodGetScene();
     }
     methodGetSceneHUD()
     {
-        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetSceneHUD();
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")?.methodGetSceneHUD();
     }
     methodGetRenderer()
     {
-        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetRenderer();
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")?.methodGetRenderer();
     }
     methodGetCamera()
     {
-        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetCamera();
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")?.methodGetCamera();
     }
     methodGetCameraPivot()
     {
-        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetCameraPivot();
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")?.methodGetCameraPivot();
+    }
+    methodGetCameraHUD()
+    {
+        return this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")?.methodGetCameraHUD();
     }
 
     // getters, but actually for the parent
@@ -68,7 +72,10 @@ export class EntityComponent
     methodGetName(){return this.#parent.methodGetName();}
     methodGetPosition(){return this.#parent.methodGetPosition();}
 
-    // setters
+    // #endregion getters
+
+    // #region setters
+
     methodSetParent(paramParent){this.#parent = paramParent;}
 
     // setters, but actually for the parent
@@ -82,14 +89,18 @@ export class EntityComponent
         this.#parent.methodSetRotations(paramRotationA, paramRotationADelta, paramRotationB, paramRotationBDelta);
     }
 
-    // registers
+    // #endregion setters
+
+    // #region registers
 
     methodRegisterMessageHandlerWithinEntity(paramInvokableHandlerName, paramInvokableHandlerValue)
     {
         this.#parent.methodRegisterMessageHandlerWithinEntity(paramInvokableHandlerName, paramInvokableHandlerValue);
     }
 
-    // lifecycle
+    // #endregion registers
+
+    // #region lifecycle
 
     methodInitialize()
     {
@@ -108,4 +119,6 @@ export class EntityComponent
     {
         this.#parent.methodSendMessageToEntitiesWithComponent(paramComponentName, paramMessage, paramEntityNameToExclude);
     }
+
+    // #endregion lifecycle
 }

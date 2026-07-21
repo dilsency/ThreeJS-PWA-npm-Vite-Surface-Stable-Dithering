@@ -11,20 +11,26 @@ import {EntityComponent} from "../classes/ECS/entity_component.js";
 // *managing whatever connections already exist*.
 export class EntityComponentPeerMeshFormation extends EntityComponent
 {
-    // bare minimum
+    // #region bare minimum
+
     #params = null;
 
     //
     #lastKnownIdsSorted = []; // last roster we actually broadcast, to detect when it's changed
 
-    // construct
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
         this.#params = params ?? {};
     }
 
-    // lifecycle
+    // #endregion construct
+
+    // #region lifecycle
 
     methodInitialize()
     {
@@ -74,7 +80,9 @@ export class EntityComponentPeerMeshFormation extends EntityComponent
         }
     }
 
-    // internal helpers
+    // #endregion lifecycle
+
+    // #region internal helpers
 
     methodHandleRoster(componentPeerConnection, localId, message)
     {
@@ -99,4 +107,6 @@ export class EntityComponentPeerMeshFormation extends EntityComponent
             componentPeerConnection.methodConnectToRemoteId(remoteId);
         }
     }
+
+    // #endregion internal helpers
 }

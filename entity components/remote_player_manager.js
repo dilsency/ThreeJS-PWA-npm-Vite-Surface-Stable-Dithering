@@ -28,11 +28,19 @@ import {EntityComponentTestCube} from "./test_objects.js";
 // MULTIPLAYER_TOPOLOGY_AND_SYNC.md.
 export class EntityComponentRemotePlayerManager extends EntityComponent
 {
-    // bare minimum
-    #params = null; // {entityManager, colorPaletteBody, colorPaletteDither, interpolationDurationSeconds}
+    // #region bare minimum
+
+    #params = null; // {entityManager, interpolationDurationSeconds}
     // `scene` is no longer part of #params - fetched via this.methodGetScene()
     // instead (see BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md; this is the
-    // cheap one-component experiment that doc proposed)
+    // cheap one-component experiment that doc proposed). `colorPaletteBody`/
+    // `colorPaletteDither` are likewise no longer params - this class already
+    // does its own cross-entity/sibling lookups (EntityComponentPeerConnection
+    // below), so looking up EntityComponentContextLocalPlayerIdentity itself
+    // is consistent with its existing shape - see
+    // BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md's "Self-lookup vs.
+    // main.js-resolves-and-passes" section.
+    #componentLocalPlayerIdentity = null;
 
     //
     #remoteEntities = new Map(); // peerId -> Entity
@@ -43,7 +51,10 @@ export class EntityComponentRemotePlayerManager extends EntityComponent
     #remoteTransformStates = new Map(); // peerId -> {startPosition, targetPosition, startQuaternion, targetQuaternion, elapsed}
     #interpolationDurationSeconds = null;
 
-    // construct
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
@@ -52,10 +63,13 @@ export class EntityComponentRemotePlayerManager extends EntityComponent
         this.#interpolationDurationSeconds = params.interpolationDurationSeconds ?? (1 / 18);
     }
 
-    // lifecycle
+    // #endregion construct
+
+    // #region lifecycle
 
     methodInitialize()
     {
+        this.#componentLocalPlayerIdentity = this.methodGetEntityByName("LocalPlayerIdentity")?.methodGetComponent("EntityComponentContextLocalPlayerIdentity");
     }
 
     methodUpdate(timeElapsed, timeDelta)
@@ -96,7 +110,9 @@ export class EntityComponentRemotePlayerManager extends EntityComponent
         this.methodInterpolateRemoteTransforms(timeDelta);
     }
 
-    // internal helpers
+    // #endregion lifecycle
+
+    // #region internal helpers
 
     methodSpawnRemotePlayer(peerId)
     {
@@ -121,8 +137,8 @@ export class EntityComponentRemotePlayerManager extends EntityComponent
             lighting: true,
             spin: false,
             shape: message.shapeIndex,
-            color1: this.#params.colorPaletteBody[message.colorIndex1],
-            color2: this.#params.colorPaletteDither[message.colorIndex2],
+            color1: this.#componentLocalPlayerIdentity.methodGetColorPaletteBody()[message.colorIndex1],
+            color2: this.#componentLocalPlayerIdentity.methodGetColorPaletteDither()[message.colorIndex2],
         }));
     }
 
@@ -215,4 +231,6 @@ export class EntityComponentRemotePlayerManager extends EntityComponent
             cube.quaternion.slerpQuaternions(state.startQuaternion, state.targetQuaternion, alpha);
         }
     }
+
+    // #endregion internal helpers
 }

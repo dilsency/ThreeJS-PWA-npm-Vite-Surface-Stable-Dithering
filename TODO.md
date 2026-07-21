@@ -135,21 +135,36 @@ a violation of whatever architecture it sets up.
    1 above is the one specific piece of it (the ready-state retry) already
    called out separately. Not re-litigating whether to convert it here — just
    flagging it as the single biggest instance in the file.
-2. **`computeCubeHUDLayout()` and its supporting constants** (`cubeHUDSize`,
-   `cubeHUDBaseOffset`, `cubeHUDTiltFactor`, `HUDCubeHorizontalAlignmentEnum`,
-   `HUDPanelYawBehaviorEnum`, the `panelInset*Px` values, etc.) — a
-   substantial geometry function (corner-projection solves for alignment,
-   yaw correction, panel fitting) living as a bare closure in
-   `initEntityComponents()`, not owned by any component.
-   `EntityComponentTestCubeHUD`/`EntityComponentBackgroundPlane` only ever
-   receive its output as constructor params; nothing about the computation
-   itself is reachable via `methodGetComponent`.
-3. **The alignment-cycling button's click handler** (inside the tuning-panel
-   block, but called out separately since it's the one handler that mutates
-   state *outside* cubeHUD too) — re-invokes `computeCubeHUDLayout()` and then
-   directly pokes `componentPanelHUD.methodGetPlane()`'s position/geometry
-   and `cubeHUDOuterNode.position` from a raw closure, rather than through a
-   sibling lookup or broadcast message.
+2. **`computeCubeHUDLayout()` and its supporting constants — done.** Moved
+   into `EntityComponentContextHUDLayout` (`entity components/context/context_hud_layout.js`),
+   attached to the "hudPanel" entity (`entityHUD`) *before*
+   `EntityComponentTestCubeHUD`/`EntityComponentBackgroundPlane`, since both
+   need its output as constructor params — `main.js`'s own
+   `computeCubeHUDLayout(alignment)` function is now
+   `componentHUDLayout.methodComputeLayout(alignment)`, and the constants it
+   depended on (`cubeHUDSize`, `cubeHUDBaseOffset`, `cubeHUDTiltFactor`, the
+   `panelInset*Px` values, etc.) are now private fields on the component,
+   with `methodGetSize()`/`methodGetTiltFactor()`/`methodGetTiltRadians()`
+   getters for the two remaining external consumers
+   (`EntityComponentTestCubeHUD`'s own constructor params, and the tuning
+   panel's `applyTuning()`). `HUDCubeHorizontalAlignmentEnum`/
+   `HUDPanelYawBehaviorEnum` are now named exports from the component's file
+   rather than `main.js` locals. This also completed `cameraHUD`'s
+   conversion in item 10/`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`, since
+   this function was `cameraHUD`'s only real consumer — the component fetches
+   and caches it via `this.methodGetCameraHUD()` in its own
+   `methodInitialize()`, same pattern as every other per-call-not-per-frame
+   `EngineContext` consumer. Verified via `npm run build`, screenshots
+   confirming cubeHUD/the panel render identically to before the move, and
+   cycling the tuning panel's alignment button through all three states
+   (LEFT/RIGHT/CENTER) with the panel/cube repositioning correctly and zero
+   console errors each time.
+3. **The alignment-cycling button's click handler** — now calls
+   `componentHUDLayout.methodComputeLayout(...)` (item 5.2, above) instead
+   of a bare function, but is otherwise unchanged: still directly pokes
+   `componentPanelHUD.methodGetPlane()`'s position/geometry and
+   `cubeHUDOuterNode.position` from a raw closure inside the tuning-panel
+   block, rather than through a sibling lookup or broadcast message.
 4. **`resizeRendererToMatchDisplaySize()` / `updateWindowSize()`** — on
    window resize, sets `camera.aspect`/`cameraHUD.aspect` and calls
    `updateProjectionMatrix()` directly on the module-level `camera`/
@@ -188,35 +203,80 @@ something like `EntityComponentSettings`/`EntityComponentInit`/
 shared values are conceptually unrelated to each other, not one grab-bag.
 
 1. **`playerColorPaletteBody`/`playerColorPaletteDither` and
-   `localCubeHUDShapeIndex`/`localPlayerColorIndex1`/`localPlayerColorIndex2`**
-   — "local player identity," read by three different places:
-   `componentCubeHUD`'s construction (resolves `color1`/`color2` from the
-   palettes directly), `EntityComponentPlayerNetworkSync`'s construction
-   (gets the raw rolled indices), and `EntityComponentRemotePlayerManager`'s
-   construction (gets the raw palettes, to decode *other* players' indices).
-   Best candidate for a real `EntityComponentLocalPlayerIdentity`-style
-   component: owns the palettes and the once-rolled indices, exposes
-   getters, and the three consumers above look it up instead of closing
-   over the same `main.js` locals.
-2. **`groundSize`/`groundPositionOffset`** (plus the derived
-   `groundMinX`/`groundMaxX`/`groundMinZ`/`groundMaxZ`) — shared between the
-   ground's own `EntityComponentTestCube` construction and the player-spawn
-   randomization math (`localPlayerStartX`/`localPlayerStartZ`, feeding
-   `entityA.methodSetPosition(...)`). Not yet a second component's
-   constructor param, but exactly the same shape of problem: some
-   `EntityComponentWorldLayout`-ish component could own the ground's real
-   footprint and be queried by whatever eventually handles player spawning,
-   instead of both derived from the same bare locals only because they
-   happen to sit in the same function.
-3. **cubeHUD's whole layout cluster** (`cubeHUDSize`, `cubeHUDBaseOffset`,
-   `cubeHUDTiltFactor`, `cubeHUDTiltRadians`,
-   `HUDCubeHorizontalAlignmentEnum`/`HUDPanelYawBehaviorEnum` and their
-   current values, `panelInsetTopPx`/`panelInsetSidePx`) — read by
-   `computeCubeHUDLayout()`, `componentCubeHUD`'s and `componentPanelHUD`'s
-   construction, and (again) the tuning panel's `applyTuning()`/alignment
-   button. Same cluster flagged in item 5.1/5.2 above from the "non-ECS
-   closure" angle; this is the same debt, viewed as "shared state" instead
-   of "shared code."
+   `localCubeHUDShapeIndex`/`localPlayerColorIndex1`/`localPlayerColorIndex2`
+   — done.** Moved into `EntityComponentContextLocalPlayerIdentity`
+   (`entity components/context/context_local_player_identity.js`, `TODO.md`
+   naming per `NAMING_CONVENTIONS.md`'s "Entity-component naming families"
+   section), attached to its own dedicated entity built by a new
+   `initLocalPlayerIdentity()` step (same "own top-level init step" pattern
+   as `initEngineContext()`, since all three consumers below need it at
+   their own construction time). All three consumers now self-lookup
+   `EntityComponentContextLocalPlayerIdentity` themselves — `main.js` no
+   longer resolves it on anyone's behalf, and the local var that used to
+   fetch it there was removed. `EntityComponentPlayerNetworkSync` and
+   `EntityComponentRemotePlayerManager` — both already single-purpose,
+   project-specific classes that already do their own cross-entity lookups
+   for `EntityComponentPeerConnection` — self-lookup it directly in their
+   own `methodInitialize()`. `componentCubeHUD` (`EntityComponentTestCubeHUD`)
+   went through an extra step: since `EntityComponentTestCube` (its
+   superclass, reused for the ground/sun's-cube/remote-player-cubes too)
+   resolves `shape`/`color1`/`color2` from constructor params into private
+   fields a subclass can't reach, `EntityComponentTestCube` gained three
+   overridable hooks (`methodGetShape()`/`methodGetColor1()`/
+   `methodGetColor2()`, mirroring the existing `methodGetTargetScene()`
+   hook), which `EntityComponentTestCubeHUD` overrides to self-lookup
+   `EntityComponentContextLocalPlayerIdentity` in its own
+   `methodInitialize()` instead. See
+   `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s "Self-lookup vs.
+   main.js-resolves-and-passes" and "Player-identity hooks on
+   EntityComponentTestCube" sections for the full reasoning, including why
+   a separate `EntityComponentTestCubePlayer` superclass was rejected
+   (`EntityComponentTestCubeHUD` has exactly one instantiation anywhere in
+   the codebase, so there's no second consumer to justify the extra layer).
+   Also dropped a stale comment claiming the two color indices were
+   "guaranteed distinct" via rejection sampling — no such sampling was ever
+   implemented, and the requirement itself is obsolete now that the two
+   indices index into two entirely separate palettes (body vs. dither), not
+   the same one. Verified via `npm run build`, a screenshot confirming
+   cubeHUD still resolves a valid color/shape, and a 2-tab PeerJS test
+   confirming identity messages (shape/color indices) still exchange
+   correctly end-to-end.
+
+   **Naming note — resolved:** `main.js`'s `initLocalPlayerIdentity()` was
+   renamed to `initContextComponents()`, generalized ahead of actually
+   needing it, so future `EntityComponentContext*` components (e.g. item
+   6.2's `EntityComponentContextWorldLayout`) that need this same "own
+   step, before `initEntityComponents()`" treatment get added inside this
+   same function rather than each earning a narrowly-named `initXxx()` of
+   their own. `initEngineContext()` stays separate — it already has its own
+   established name/rationale, and folding it in wasn't part of this
+   rename.
+2. **`groundSize`/`groundPositionOffset` (plus the derived min/max bounds)
+   — done, but see item 6's new sub-item below for `localPlayerStartPosition`
+   specifically.** Moved into `EntityComponentContextWorldLayout`
+   (`entity components/context/context_world_layout.js`), attached to its
+   own dedicated `"WorldLayout"` entity, built inside the now-generalized
+   `initContextComponents()` alongside `EntityComponentContextLocalPlayerIdentity`.
+   `main.js` fetches it via `entityManager.methodGetEntityByName("WorldLayout")`
+   and calls plain getters — the ground's own `EntityComponentTestCube`
+   construction reads `methodGetGroundSize()`/`methodGetGroundPositionOffset()`,
+   and player-spawn randomization calls `methodGetRandomSpawnPositionXZ()`
+   (which owns the whole min/max-bounds-plus-`Math.random()` computation
+   internally, rather than exposing raw bounds for `main.js` to combine
+   itself — "a valid random spawn point" is a world-layout concern, not
+   orchestration code). Verified via `npm run build`, a screenshot
+   confirming the ground still renders at the correct size/position, and a
+   2-tab PeerJS test confirming player spawn positioning still works with
+   zero errors.
+3. **cubeHUD's whole layout cluster — done, resolved by item 5.2.** Same
+   cluster flagged in item 5.1/5.2 from the "non-ECS closure" angle; moving
+   `computeCubeHUDLayout()` into `EntityComponentContextHUDLayout` resolved
+   this "shared state" framing too, since the constants moved along with the
+   function that used them, rather than staying behind as orphaned `main.js`
+   locals. The tuning panel's `applyTuning()`/alignment button (still
+   unconverted, item 5.1/5.3) now reads what it needs from the component
+   (`methodGetTiltRadians()`, `methodComputeLayout()`) instead of closing
+   over bare locals.
 4. **Component instances captured and hand-carried to other entities'
    components**: `componentLightWorld` (created on `entityLight`, passed
    directly as `source:` into `EntityComponentLightManager` on the separate
@@ -231,21 +291,47 @@ shared values are conceptually unrelated to each other, not one grab-bag.
    (see `EntityComponentPlayerNetworkSync`'s lookup of
    `EntityComponentPeerConnection` on the separate "multiplayer" entity for
    a working example already in the codebase).
-5. **`camera`/`cameraPivot`/`cameraHUD`/`scene`/`sceneHUD`/`renderer`/
-   `entityManager`** — the core module-level engine singletons, referenced
-   directly by nearly every component constructor in the file. Named
-   separately from 1-4 because these are a different category: not
-   computed/derived state, but the base engine handles every visual or
-   behavioral component fundamentally needs. Flagged for a deliberate
-   decision rather than silently excluded (same treatment as item 5.5's
-   render loop) — it's plausible these are simply infrastructure that
-   should keep being passed by reference the way dependency injection
-   normally works, not values that belong on a component. Full exploration
-   of this specific question — pros, cons, and a cheap one-component
-   experiment to test it before committing either way — is written up in
-   `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`; still undecided. Item 10
-   tracks the concrete mechanism that doc proposes (`methodGetEntityByName`
-   + a named "EngineContext" entity).
+5. **`camera`/`cameraPivot`/`cameraHUD`/`scene`/`sceneHUD`/`renderer` — done
+   (item 10); `entityManager` still open.** The first six were the core
+   module-level engine singletons referenced directly by nearly every
+   component constructor in the file — all now looked up through
+   `EntityComponentContextEngine` instead (see item 10 and
+   `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md` for the full exploration and
+   verification history). `entityManager` was deliberately excluded from
+   that conversion — it's a different category (the ECS's own bookkeeping
+   structure, not an external engine resource like the other six), and
+   remains passed by reference the way it always has been
+   (`EntityComponentRemotePlayerManager`'s constructor param, for spawning/
+   despawning remote-player entities). Whether `entityManager` deserves the
+   same treatment is still an open, undecided question — not addressed by
+   item 10's conversion.
+6. **`localPlayerStartPosition` (`main.js`'s `initEntityComponents()`) —
+   done.** Moved into `EntityComponentContextPlayerInitialization`
+   (`entity components/context/context_player_initialization.js`), attached
+   to its own dedicated `"PlayerInitialization"` entity, built inside
+   `initContextComponents()` after `EntityComponentContextWorldLayout` (on
+   purpose - it self-looks-up that component in its own
+   `methodInitialize()`, so `WorldLayout` has to already exist first). It
+   self-looks-up `EntityComponentContextWorldLayout` for the ground's
+   bounds, calls `methodGetRandomSpawnPositionXZ()` once, and exposes the
+   result via `methodGetSpawnPosition()`.
+   `EntityComponentCameraControllerFirstPerson` self-looks up *that*
+   component instead and sets `cameraPivot.position` directly in its own
+   `methodInitialize()`, the same self-lookup shape as its existing
+   `camera`/`cameraPivot`/`scene` caching. This is the first
+   `EntityComponentContext*` component built with exactly one consumer in
+   mind from the start — see `NAMING_CONVENTIONS.md`'s "A single consumer is
+   fine, conditionally" section for the two conditions that justify it
+   (streamlines `main.js`; encapsulates the camera controller from ever
+   needing to know spawn positions come from ground bounds at all) and why
+   the family's original "multiple consumers" framing needed loosening to
+   allow this. `main.js` no longer computes or sets the spawn position at
+   all - the `localPlayerStartPosition` local and the explicit
+   `entityA.methodSetPosition(...)` spawn call were both removed. Verified
+   via `npm run build`, a headless-browser check confirming the spawn
+   position lands within the ground's actual bounds with zero console
+   errors, and a 2-tab PeerJS test confirming movement still syncs
+   correctly end-to-end.
 
 ## 7. Interpolate remote players' cube position and rotation(s) — done
 
@@ -326,18 +412,21 @@ concrete cross-entity messaging need yet (the attack/Health scenario that
 motivated it in `ECS_MESSAGING_DESIGN.md` remains hypothetical), so this
 exists ahead of a use case rather than being exercised by anything today.
 
-## 10. `methodGetEntityByName` + a named "EngineContext" entity for bare-minimum Three.js state
+## 10. `methodGetEntityByName` + a named "EngineContext" entity for bare-minimum Three.js state — done
 
-**Mechanism proven for `scene`, `sceneHUD`, `renderer`, `camera`, and
-`cameraPivot`; only `cameraHUD` remains.** Full reasoning and status in
-`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`; this item tracks the concrete
-mechanism that doc proposes as an answer to item 6.5's "flagged for a
-deliberate decision" cluster (`scene`/`sceneHUD`/`renderer`/`camera`/
-`cameraPivot`/`cameraHUD`), rather than duplicating that item.
+**All six bare-minimum values converted — done.** `scene`, `sceneHUD`,
+`renderer`, `camera`, `cameraPivot`, and (via item 5.2's
+`EntityComponentContextHUDLayout` landing) `cameraHUD` are all now looked up
+through `EntityComponentContextEngine` instead of hard-wired constructor
+params. Full reasoning and status in `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`;
+this item tracks the concrete mechanism that doc proposes as an answer to
+item 6.5's "flagged for a deliberate decision" cluster (`scene`/`sceneHUD`/
+`renderer`/`camera`/`cameraPivot`/`cameraHUD`), rather than duplicating that
+item.
 
-**Done:** `EntityManager.methodGetEntityByName`, `EntityComponentEngineContext`
-(now holding `scene`/`renderer`/`camera`/`cameraPivot`,
-`entity components/engine_context.js`),
+**Done:** `EntityManager.methodGetEntityByName`, `EntityComponentContextEngine`
+(now holding `scene`/`sceneHUD`/`renderer`/`camera`/`cameraPivot`/`cameraHUD`,
+`entity components/context/context_engine.js`),
 `EntityComponent.methodGetScene()`/`methodGetRenderer()`/`methodGetCamera()`/
 `methodGetCameraPivot()`, and `main.js`'s `initEngineContext()` step.
 Converted `EntityComponentRemotePlayerManager` for `scene`,
@@ -370,7 +459,7 @@ and `EntityComponentLightManager`'s `methodUpdate()` — see
 `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s experiment sections for full
 verification detail on all three.
 
-**`sceneHUD` done too:** `EntityComponentEngineContext` now also holds
+**`sceneHUD` done too:** `EntityComponentContextEngine` now also holds
 `sceneHUD`, with a matching `EntityComponent.methodGetSceneHUD()`.
 Converted `EntityComponentBackgroundPlane` directly (single instantiation,
 no roadblock, same shape as `scene`/`renderer`'s easy picks). For the
@@ -392,17 +481,26 @@ test confirming remote-player cube spawning still works — see
 `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s `sceneHUD` section for full
 detail.
 
-**Still open:** only `cameraHUD` remains.
-Deciding how to handle that is still unresolved.
+**`cameraHUD` done too, item 5.2 unblocked it:** `EntityComponentContextEngine`
+now also holds `cameraHUD`, with a matching `EntityComponent.methodGetCameraHUD()`.
+Its one real consumer, `computeCubeHUDLayout()`, became a real
+`EntityComponent` (`EntityComponentContextHUDLayout`, item 5.2) in the same
+pass, which is what gave `cameraHUD` something to be looked up from. Fetched
+and cached in that component's own `methodInitialize()`, same
+resolve-once-per-instance pattern as every other non-per-frame consumer.
+
+This item's original open question is now fully resolved for all six
+bare-minimum values — see `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md` for the
+complete verification history across each one.
 
 **The proposal:** add `EntityManager.methodGetEntityByName(paramName)` —
 delegated through `Entity`/`EntityComponent` the same way
 `methodGetEntitiesWithComponent` already is — and build an
-`EntityComponentEngineContext` holding the bare-minimum Three.js objects,
+`EntityComponentContextEngine` holding the bare-minimum Three.js objects,
 attached to a single entity given a fixed, predictable name (`"EngineContext"`
 or `"BareMinimum"`) instead of an auto-generated one. Every component that
 currently receives `scene`/`camera`/etc. as constructor params would instead
-fetch them via `this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")`.
+fetch them via `this.methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")`.
 Resolves the mismatch between `methodGetEntitiesWithComponent` (built for
 filtering an unknown/dynamic *set* of entities) and a resource that's
 known-unique and known-permanent for the app's entire lifetime — no
@@ -412,7 +510,7 @@ Three.js's own `Object3D.getObjectByName`.
 **Also add matching shorthand getters on `EntityComponent`** —
 `methodGetScene()`/`methodGetSceneHUD()`/`methodGetRenderer()`/
 `methodGetCamera()`/`methodGetCameraPivot()`/`methodGetCameraHUD()` — each
-composing the same `methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentEngineContext")?.methodGetX()`
+composing the same `methodGetEntityByName("EngineContext")?.methodGetComponent("EntityComponentContextEngine")?.methodGetX()`
 chain internally, so consumers call e.g. `this.methodGetScene()` directly
 rather than repeating that chain (and the two literal name strings) at
 every call site. Worth building alongside the lookup itself rather than
@@ -453,7 +551,7 @@ relying on a future reader noticing it. See
 `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s "Ensuring EngineContext
 initializes before everything else" section for the full reasoning,
 including two related points still open for consideration (not decided):
-keeping `EntityComponentEngineContext` itself strictly synchronous (no
+keeping `EntityComponentContextEngine` itself strictly synchronous (no
 async `methodInitialize()`), and whether the six shorthand getters should
 `console.error` rather than silently return `undefined` if `EngineContext`
 isn't found yet.
@@ -464,3 +562,63 @@ convert just `EntityComponentDirectionalLight` for the world sun, or the
 ground's `EntityComponentTestCube`) to confirm the lookup/ordering actually
 works in practice and that the resulting code reads better, before deciding
 whether to mechanically repeat it for every other bare-minimum consumer.
+
+## 11. Overridable Context references (`refContext*` constructor params) — ongoing discussion, not decided
+
+Status: **postponed - discussed, not decided, no implementation yet.**
+
+Every `EntityComponent` that self-looks-up an `EntityComponentContext*`
+component today does so fully hard-wired: the entity name and component
+class name it looks for are both literal strings baked into its own
+`methodInitialize()` (e.g.
+`EntityComponentCameraControllerFirstPerson` always looks for entity
+`"PlayerInitialization"` holding `"EntityComponentContextPlayerInitialization"`).
+Motivation for revisiting this: the project wants multiple worlds/areas for
+the player to explore eventually, which means multiple instances of the
+same kind of Context data (e.g. more than one
+`EntityComponentContextWorldLayout`, one per world/area) - today's
+hard-wired self-lookups have no way to pick which instance a given
+consumer should use.
+
+**Proposed direction:** an optional constructor param, prefixed
+`refContext` (e.g. `refContextWorldLayout`), that overrides which specific
+Context entity/component a consumer's self-lookup targets, falling back to
+today's hard-wired default when the param isn't passed - so existing
+call sites (which don't need this yet) stay untouched.
+
+**Open questions, not yet resolved:**
+
+- **Does the override swap just the entity name, or the component class
+  name too?** Swapping only the entity name (multiple instances of the
+  *same* Context class, e.g. two `EntityComponentContextWorldLayout`s on
+  two differently-named entities) is straightforward. Swapping the class
+  name as well - standing in a differently-named class entirely - is a
+  much bigger commitment: JS has no way to enforce that the substitute
+  actually exposes the same methods the consumer expects, so this would be
+  an unenforced, implicit interface. Needs a decision before implementing
+  either.
+- **Blast radius / cost.** Every self-lookup would need to thread an
+  optional override through its own constructor instead of being a bare
+  one-liner in `methodInitialize()`. Several current self-looking-up
+  components (e.g. `EntityComponentCameraControllerFirstPerson`) take
+  *zero* constructor params today specifically because they don't need
+  any - that was a deliberate simplification (see
+  `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s "Self-lookup vs.
+  main.js-resolves-and-passes" section), and retrofitting this would
+  partially undo it.
+- **`EngineContext`'s six shorthand getters are a special case.** Those
+  live on the `EntityComponent` *base class* itself
+  (`methodGetScene()`/`methodGetCamera()`/etc. - see
+  `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s "Convenience getters"
+  section), shared by every component in the codebase. Making those
+  overridable per-instance would mean every component threading this
+  through `super(params)`, whether it needs the feature or not, even
+  though nothing in this codebase has ever needed more than one
+  `scene`/`camera`/`renderer`. Likely out of scope for this item even if
+  the rest goes ahead - needs an explicit decision either way, not a
+  silent omission.
+
+No `EntityComponentContext*` component has more than one instance in the
+codebase today, so this remains speculative until the multi-world/area
+work actually starts - revisit this item once that work is concrete enough
+to pin down the two open questions above against a real use case.

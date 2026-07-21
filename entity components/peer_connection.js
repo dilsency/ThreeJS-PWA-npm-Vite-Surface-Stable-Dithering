@@ -18,7 +18,8 @@ import {Peer} from "peerjs";
 // gameplay state, which belong in their own components per that doc.
 export class EntityComponentPeerConnection extends EntityComponent
 {
-    // bare minimum
+    // #region bare minimum
+
     #params = null;
 
     //
@@ -32,7 +33,10 @@ export class EntityComponentPeerConnection extends EntityComponent
     #pendingMessages = []; // [{peerId, message}], written by conn.on('data', ...); moved into #messagesThisFrame once per frame by our own methodUpdate()
     #messagesThisFrame = []; // this frame's batch - read non-destructively by any number of sibling components (see methodGetMessagesThisFrame())
 
-    // construct
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
@@ -54,7 +58,9 @@ export class EntityComponentPeerConnection extends EntityComponent
         });
     }
 
-    // lifecycle
+    // #endregion construct
+
+    // #region lifecycle
 
     methodInitialize()
     {
@@ -103,7 +109,9 @@ export class EntityComponentPeerConnection extends EntityComponent
         this.#pendingMessages = [];
     }
 
-    // getters
+    // #endregion lifecycle
+
+    // #region getters
 
     methodGetLocalId(){return this.#localId;}
     methodGetIsOpen(){return this.#isOpen;}
@@ -124,7 +132,9 @@ export class EntityComponentPeerConnection extends EntityComponent
         return this.methodGetIsHostForId(firstId);
     }
 
-    // actions
+    // #endregion getters
+
+    // #region actions
 
     methodConnectToRemoteId(remoteId)
     {
@@ -159,7 +169,9 @@ export class EntityComponentPeerConnection extends EntityComponent
         return this.#messagesThisFrame;
     }
 
-    // internal helpers
+    // #endregion actions
+
+    // #region internal helpers
 
     methodGenerateShortId()
     {
@@ -182,6 +194,8 @@ export class EntityComponentPeerConnection extends EntityComponent
             this.#connectionIsHost.delete(conn.peer);
         });
     }
+
+    // #endregion internal helpers
 }
 
 // Owns the plain-DOM one-time-code UI: a label showing the local code, and an
@@ -210,7 +224,8 @@ export class EntityComponentPeerConnection extends EntityComponent
 // UI for good the instant any connection existed.
 export class EntityComponentPeerConnectionUI extends EntityComponent
 {
-    // bare minimum
+    // #region bare minimum
+
     #params = null;
 
     //
@@ -227,14 +242,19 @@ export class EntityComponentPeerConnectionUI extends EntityComponent
     #isExpanded = true; // default: input/button/^ visible, v hidden
     #hasAutoCollapsedOnConnect = false;
 
-    // construct
+    // #endregion bare minimum
+
+    // #region construct
+
     constructor(params)
     {
         super(params);
         this.#params = params;
     }
 
-    // lifecycle
+    // #endregion construct
+
+    // #region lifecycle
 
     methodInitialize()
     {
@@ -359,7 +379,9 @@ export class EntityComponentPeerConnectionUI extends EntityComponent
         this.#elementLocalIdLabel.style.display = (isConnected && !isHost) ? "none" : "";
     }
 
-    // handlers
+    // #endregion lifecycle
+
+    // #region handlers
 
     methodOnClickConnect()
     {
@@ -374,4 +396,6 @@ export class EntityComponentPeerConnectionUI extends EntityComponent
         //
         componentPeerConnection.methodConnectToRemoteId(remoteId);
     }
+
+    // #endregion handlers
 }
