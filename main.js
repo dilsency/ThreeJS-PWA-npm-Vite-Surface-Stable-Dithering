@@ -13,7 +13,6 @@ import {Entity} from "./classes/ECS/entity.js";
 import {EntityComponent} from "./classes/ECS/entity_component.js";
 // entity components
 import {EntityComponentCameraControllerFirstPerson} from "./entity components/camera_controller_first_person.js";
-import {EntityComponentCameraControllerFirstPersonInput} from "./entity components/camera_controller_first_person.js";
 import {EntityComponentPlayerController} from "./entity components/player_controller.js";
 import {EntityComponentPlayerControllerInput} from "./entity components/player_controller.js";
 import {EntityComponentTestCube} from "./entity components/test_objects.js";
@@ -33,6 +32,7 @@ import {EntityComponentContextHUDLayout, HUDCubeHorizontalAlignmentEnum} from ".
 import {EntityComponentContextLocalPlayerIdentity} from "./entity components/context/context_local_player_identity.js";
 import {EntityComponentContextWorldLayout} from "./entity components/context/context_world_layout.js";
 import {EntityComponentContextPlayerInitialization} from "./entity components/context/context_player_initialization.js";
+import {EntityComponentContextEnvironment} from "./entity components/context/context_environment.js";
 
 // bare minimum
 var scene;
@@ -190,6 +190,11 @@ function init()
     //   EntityComponentContextWorldLayout below, on purpose - it self-looks-up
     //   that component in its own methodInitialize(), so WorldLayout has to
     //   already exist by the time it runs.
+    // - EntityComponentContextEnvironment (see
+    //   entity components/context/context_environment.js): touch-vs-pointer
+    //   and native-shell-vs-browser detection, self-looked-up by
+    //   EntityComponentPeerConnectionUI (and, going forward, whatever
+    //   touch-input component ends up needing the touch-primary check).
     function initContextComponents()
     {
         //
@@ -199,6 +204,11 @@ function init()
         const entityLocalPlayerIdentity = new Entity(null);
         entityManager.methodAddEntity(entityLocalPlayerIdentity, "LocalPlayerIdentity");
         entityLocalPlayerIdentity.methodAddComponentWithName("EntityComponentContextLocalPlayerIdentity", new EntityComponentContextLocalPlayerIdentity(null));
+
+        //
+        const entityEnvironment = new Entity(null);
+        entityManager.methodAddEntity(entityEnvironment, "Environment");
+        entityEnvironment.methodAddComponentWithName("EntityComponentContextEnvironment", new EntityComponentContextEnvironment(null));
 
         //
         const entityWorldLayout = new Entity(null);
@@ -235,8 +245,12 @@ function init()
         const entityA = new Entity(null);
         entityManager.methodAddEntity(entityA, "player");
         //
+        // No EntityComponentCameraControllerFirstPersonInput/...InputTouch
+        // construction here - EntityComponentCameraControllerFirstPerson
+        // self-attaches whichever one it needs, in its own
+        // methodInitialize() (see BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md's
+        // "Pattern C: self-attaching sibling components" section).
         entityA.methodAddComponentWithName("EntityComponentCameraControllerFirstPerson", new EntityComponentCameraControllerFirstPerson());
-        entityA.methodAddComponentWithName("EntityComponentCameraControllerFirstPersonInput", new EntityComponentCameraControllerFirstPersonInput());
         //
         entityA.methodAddComponentWithName("EntityComponentPlayerController", new EntityComponentPlayerController({cameraPivot: cameraPivot,}));
         entityA.methodAddComponentWithName("EntityComponentPlayerControllerInput", new EntityComponentPlayerControllerInput());

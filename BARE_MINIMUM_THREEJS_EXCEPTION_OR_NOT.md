@@ -31,6 +31,17 @@ Alphabetical.
   and returns its shape index → that's what gets fed into
   `createFractalMaterialFromSources(...)`. Same shared algorithm either way;
   only the data source at that one decision point changes per-subclass.
+- **Self-attaching sibling (Pattern C)** — a component that constructs a
+  brand-new sibling component and attaches it to its own entity, from
+  within its own `methodInitialize()`, via
+  `this.methodGetParent().methodAddComponentWithName(name, component)` —
+  rather than `main.js` ever constructing or knowing about that sibling.
+  Distinct from self-lookup (Pattern A, see "Self-lookup vs.
+  main.js-resolves-and-passes" below): self-lookup *finds* a component
+  that already exists elsewhere in the ECS; this *creates* one that
+  wouldn't otherwise exist. See "Pattern C: self-attaching sibling
+  components" below for the full reasoning and the motivating
+  `EntityComponentCameraControllerFirstPersonInput`/`...InputTouch` case.
 
 Status: **resolved — the mechanism is proven and all six values are
 converted, plus cameraPivot (not a Three.js value, but tightly tied to
@@ -397,6 +408,121 @@ or would only ever be instantiated once, for one clear role. Use Pattern B
 class whose job is unrelated to any specific Context entity — where
 knowing "LocalPlayerIdentity" or "HUDLayout" exists by name would be a real,
 unwanted coupling, not just a convenience choice.
+
+## Pattern C: self-attaching sibling components
+
+Status: **done.** Implemented for choosing between
+`EntityComponentCameraControllerFirstPersonInput` (mouse+keyboard) and
+`EntityComponentCameraControllerFirstPersonInputTouch` (touch), both in
+`entity components/camera_controller_first_person.js`. Verified via
+`npm run build`, a headless-browser check confirming a plain (non-touch)
+context self-attaches the mouse+keyboard class and a `hasTouch`/`isMobile`
+context self-attaches the touch class, a synthetic touch-drag test
+confirming the camera actually rotates from touch input end-to-end, and
+the existing 2-tab PeerJS multiplayer test confirming
+`EntityComponentPlayerNetworkSync` (downstream of this component) still
+works correctly.
+
+**How this differs from self-lookup (Pattern A).** Self-lookup *finds*
+something that already exists elsewhere in the ECS — typically a
+`EntityComponentContext*` component on a separate, well-known entity, put
+there ahead of time by `main.js`. Pattern C is a different shape entirely:
+a component's own `methodInitialize()` *constructs a brand-new sibling
+component* and attaches it to its own entity, rather than `main.js` ever
+constructing or knowing about that sibling at all.
+
+**The motivating case.** `EntityComponentCameraControllerFirstPerson`
+already hardcodes the sibling lookup string
+`"EntityComponentCameraControllerFirstPersonInput"` in its own
+`methodUpdate()` — it's already coupled to that name and to the exact
+shape it exposes (`keys`/`mouseX`/`mouseY`/`methodResetMouse()`). Once
+there are *two* concrete classes that can satisfy that shape (mouse+keyboard
+vs. touch), something has to decide which one actually gets constructed.
+The options considered: `main.js` branches on
+`EntityComponentContextEnvironment.methodGetIsTouchPrimary()` before
+constructing whichever one, or `EntityComponentCameraControllerFirstPerson`
+decides and attaches its own Input sibling itself, inside its own
+`methodInitialize()`. Chosen: the latter — since Logic already hardcodes
+the sibling's *name* and *interface*, deciding which *concrete class*
+satisfies that interface is a small, natural extension of a coupling that
+already exists, not a new one. It also means `main.js` never needs to know
+an Input sibling exists at all, let alone that there are two variants of
+it — a stronger version of "no loose code in `main.js`" than reading a
+getter to pick between two constructor calls would have been.
+
+**The mechanics.** Nothing new has to be built to support this —
+`EntityComponent.methodGetParent()` already returns the owning `Entity`,
+and `Entity.methodAddComponentWithName(name, component)` (the same method
+`main.js` already calls for every component) works identically no matter
+who calls it:
+
+```js
+methodInitialize()
+{
+    // ...resolve scene/camera/cameraPivot as before...
+
+    const componentEnvironment = this.methodGetEntityByName("Environment")?.methodGetComponent("EntityComponentContextEnvironment");
+    const componentInput = componentEnvironment.methodGetIsTouchPrimary()
+        ? new EntityComponentCameraControllerFirstPersonInputTouch()
+        : new EntityComponentCameraControllerFirstPersonInput();
+    this.methodGetParent().methodAddComponentWithName("EntityComponentCameraControllerFirstPersonInput", componentInput);
+
+    // ...rest of methodInitialize() as before...
+}
+```
+
+**No ordering hazard.** `Entity.methodAddComponentWithName()` synchronously
+calls the new component's own `methodInitialize()` the moment it's
+attached, and nothing reads `keys`/`mouseX`/`mouseY` until `methodUpdate()`
+runs later, well after every entity across the whole init phase has
+finished being built. Attaching a sibling mid-`methodInitialize()`, rather
+than up front in `main.js`, changes *who* calls
+`methodAddComponentWithName()`, not *when* relative to the frame loop.
+
+**The trade-off, named plainly.** Today, swapping in a different Input
+implementation (e.g. for a future test double) is a one-line change in
+`main.js`. Under Pattern C, that choice is hardcoded inside
+`EntityComponentCameraControllerFirstPerson` itself, so swapping it means
+editing the Logic class, not `main.js`. Accepted here because this
+project's own verification practice is real end-to-end browser/Playwright
+runs (see `CLAUDE.md` — there is no unit-test suite doing per-component
+dependency injection), so this cost is mostly theoretical rather than one
+this project actually pays today.
+
+**When to reach for Pattern C vs. Pattern A/B:** use it when a component
+already owns a hardcoded sibling-name dependency (the way
+`EntityComponentCameraControllerFirstPerson` already owned
+`"EntityComponentCameraControllerFirstPersonInput"`), and the open question
+is specifically *which concrete class* should satisfy that already-fixed
+interface — not whether some *shared state* needs finding (that's still
+Pattern A/B's territory, via `EntityComponentContext*` components).
+
+**A real bug caught during implementation, worth remembering.**
+`EntityComponentCameraControllerFirstPersonInput` registers its keydown/
+keyup listeners on both `document` and `window`, "to be robust across
+dev/preview builds" (some environments deliver keyboard events to `window`
+instead of `document`, depending on focus). `EntityComponentCameraControllerFirstPersonInputTouch`
+copied that same document+window pattern for its touch listeners at
+first — and it silently broke touch look entirely. The difference:
+`e.movementX`/`e.movementY` are deltas the *browser* already computed, so
+reading the same event twice (once via each listener, since a bubbled
+event fired on `document` reaches `window` too) just re-assigns the same
+harmless value twice. Touch events carry only *absolute* coordinates, so
+this class computes its own delta from a stored last-known position — and
+firing twice per real event meant the second firing immediately
+recomputed a delta of *zero* against the position the first firing just
+moved to, discarding the real delta before
+`EntityComponentCameraControllerFirstPerson.methodUpdate()` ever read it.
+A synthetic touch-drag test caught this directly (deltas logged, but no
+matching rotation ever applied) before it could ship. Fixed by listening
+on `document` only — touch events bubble from wherever they were actually
+touched, so there's no cross-target ambiguity here the way there is for
+keyboard focus, and no window-level listener was ever needed. **The
+lesson:** "register on both document and window for robustness" is safe
+specifically when the value read is already fully computed by the browser
+per-event; it silently corrupts anything computed by diffing against
+component-held state across events, and needs re-checking case by case
+rather than copied by habit.
 
 ## Player-identity hooks on `EntityComponentTestCube`
 

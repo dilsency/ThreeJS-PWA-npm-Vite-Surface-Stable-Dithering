@@ -260,8 +260,11 @@ export class EntityComponentPeerConnectionUI extends EntityComponent
     {
         // early return: running inside a future native (Electron/Tauri) shell,
         // which will use real socket discovery instead - nothing to show here.
-        const isRunningInsideNativeShell = (typeof window !== 'undefined') && (window.electronAPI != null || window.__TAURI__ != null);
-        if(isRunningInsideNativeShell){return;}
+        // Self-looked-up from EntityComponentContextEnvironment rather than
+        // checked inline here - see
+        // entity components/context/context_environment.js.
+        const componentEnvironment = this.methodGetEntityByName("Environment")?.methodGetComponent("EntityComponentContextEnvironment");
+        if(componentEnvironment.methodGetIsNativeShell()){return;}
 
         //
         this.#elementContainer = document.createElement("div");

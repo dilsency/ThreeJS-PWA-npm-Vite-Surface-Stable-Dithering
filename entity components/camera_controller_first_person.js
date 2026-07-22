@@ -98,6 +98,117 @@ export class EntityComponentCameraControllerFirstPersonInput extends EntityCompo
     }
 }
 
+// Touch equivalent of EntityComponentCameraControllerFirstPersonInput -
+// exposes the exact same shape (keys/mouseX/mouseY/methodResetMouse()) so
+// EntityComponentCameraControllerFirstPerson doesn't need to know which of
+// the two is actually attached (see BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md's
+// "Pattern C: self-attaching sibling components" section for how that
+// choice gets made). No touch equivalent for the arrow-key nudge/reset
+// behavior yet - keys stays permanently all-false, since there's no
+// keyboard on a touch device; EntityComponentCameraControllerFirstPerson
+// still reads it unconditionally, so the field has to exist regardless.
+// Only the first touch point drives look - no pinch/multi-finger gestures
+// in this first pass.
+export class EntityComponentCameraControllerFirstPersonInputTouch extends EntityComponent
+{
+    #params = null;
+    #keys = null;
+    #mouseX = null;
+    #mouseY = null;
+    #lastTouchX = null;
+    #lastTouchY = null;
+    constructor(params)
+    {
+        super(params);
+        this.#params = params;
+    }
+    get keys() {return this.#keys;}
+    get mouseX(){return this.#mouseX;}
+    get mouseY(){return this.#mouseY;}
+    methodInitialize()
+    {
+        //
+        this.#keys =
+        {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            reset: false,
+        };
+        this.#mouseX = 0;
+        this.#mouseY = 0;
+
+        // document only, deliberately NOT also window (unlike
+        // EntityComponentCameraControllerFirstPersonInput's keydown/keyup
+        // listeners) - touch events are dispatched based on which element
+        // was actually touched and bubble up through the DOM tree, so a
+        // document-level listener already catches every one of them;
+        // there's no cross-target focus ambiguity here the way there is for
+        // keyboard events (see that class's own comment). Registering on
+        // window too would mean this class's own delta computation runs
+        // twice per real event (both catch the same bubbled event) - each
+        // touchmove computes its delta from a stored last-position field
+        // (not an already-computed browser delta like e.movementX), so a
+        // second run immediately after the first would just recompute a
+        // delta of 0 against the position the first run just moved to,
+        // discarding the real one before EntityComponentCameraControllerFirstPerson's
+        // methodUpdate() ever gets a chance to read it.
+        //
+        // {passive: false} so methodEventOnTouchMove() below can call
+        // e.preventDefault() - touch listeners default to passive (unable
+        // to preventDefault()) for scroll performance, and without this,
+        // dragging to look around would also scroll/pinch-zoom the page
+        // underneath it.
+        document.addEventListener('touchstart', (e) => this.methodEventOnTouchStart(e), {passive: false});
+        document.addEventListener('touchmove', (e) => this.methodEventOnTouchMove(e), {passive: false});
+        document.addEventListener('touchend', (e) => this.methodEventOnTouchEnd(e), {passive: false});
+        document.addEventListener('touchcancel', (e) => this.methodEventOnTouchEnd(e), {passive: false});
+    }
+
+    methodEventOnTouchStart(e)
+    {
+        const touch = e.touches[0];
+        if(touch == null){return;}
+        this.#lastTouchX = touch.clientX;
+        this.#lastTouchY = touch.clientY;
+    }
+
+    methodEventOnTouchMove(e)
+    {
+        const touch = e.touches[0];
+        if(touch == null){return;}
+        if(this.#lastTouchX == null || this.#lastTouchY == null){return;} // no prior touchstart to diff against
+
+        e.preventDefault();
+
+        // Delta since the last touchmove/touchstart - mirrors
+        // e.movementX/e.movementY's "moved since last event" semantics for
+        // mouse (see EntityComponentCameraControllerFirstPersonInput.methodEventOnMouseMove()
+        // above), just computed by hand since touch events carry absolute
+        // coordinates, not a ready-made delta.
+        this.#mouseX = touch.clientX - this.#lastTouchX;
+        this.#mouseY = touch.clientY - this.#lastTouchY;
+
+        this.#lastTouchX = touch.clientX;
+        this.#lastTouchY = touch.clientY;
+    }
+
+    methodEventOnTouchEnd(e)
+    {
+        // Clears tracking so the next touchstart doesn't diff against a
+        // stale position left over from this now-ended touch.
+        this.#lastTouchX = null;
+        this.#lastTouchY = null;
+    }
+
+    methodResetMouse()
+    {
+        this.#mouseX = 0;
+        this.#mouseY = 0;
+    }
+}
+
 export class EntityComponentCameraControllerFirstPerson extends EntityComponent
 {
     // scene/camera/cameraPivot used to be constructor params - now resolved
@@ -137,6 +248,19 @@ export class EntityComponentCameraControllerFirstPerson extends EntityComponent
     methodGetCameraQuaternion(){return this.#camera.quaternion;}
     methodInitialize()
     {
+        // Self-attaches its own Input sibling instead of receiving it from
+        // main.js - see BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md's "Pattern
+        // C: self-attaching sibling components" section. Which concrete
+        // class actually gets attached depends on
+        // EntityComponentContextEnvironment's touch-primary detection, but
+        // main.js never needs to know that, or that there are two classes
+        // to choose between at all.
+        const componentEnvironment = this.methodGetEntityByName("Environment")?.methodGetComponent("EntityComponentContextEnvironment");
+        const componentInput = componentEnvironment.methodGetIsTouchPrimary()
+            ? new EntityComponentCameraControllerFirstPersonInputTouch()
+            : new EntityComponentCameraControllerFirstPersonInput();
+        this.methodGetParent().methodAddComponentWithName("EntityComponentCameraControllerFirstPersonInput", componentInput);
+
         this.#scene = this.methodGetScene();
         this.#camera = this.methodGetCamera();
         this.#cameraPivot = this.methodGetCameraPivot();

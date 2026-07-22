@@ -622,3 +622,48 @@ No `EntityComponentContext*` component has more than one instance in the
 codebase today, so this remains speculative until the multi-world/area
 work actually starts - revisit this item once that work is concrete enough
 to pin down the two open questions above against a real use case.
+
+## 12. Basic mobile/Android touch controls (camera look) — done
+
+Swipe-to-look, matching the ask: swiping either direction turns the camera
+that way, mirroring mouse-look's `speedX`/`speedY` math exactly. No touch
+equivalent for the arrow-key nudge/reset behavior yet - deliberately out of
+scope for this first pass, since nothing asked for it and `keys` staying
+permanently all-`false` on touch doesn't break
+`EntityComponentCameraControllerFirstPerson`'s unconditional read of it.
+
+New `EntityComponentCameraControllerFirstPersonInputTouch`
+(`entity components/camera_controller_first_person.js`), tracks the first
+touch point's position across `touchstart`/`touchmove`/`touchend` and
+computes a `mouseX`/`mouseY` delta by hand each `touchmove` (touch events
+carry only absolute coordinates, unlike `e.movementX`/`e.movementY` for
+mouse), exposing the exact same `keys`/`mouseX`/`mouseY`/`methodResetMouse()`
+shape as the existing `EntityComponentCameraControllerFirstPersonInput` so
+`EntityComponentCameraControllerFirstPerson` doesn't need to know which one
+is actually attached.
+
+Also the first real use of `EntityComponentContextEnvironment`'s
+`methodGetIsTouchPrimary()`, and the first implementation of "Pattern C:
+self-attaching sibling components" (see
+`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md` and `NAMING_CONVENTIONS.md`
+for both) — `EntityComponentCameraControllerFirstPerson` decides which
+Input class to construct and attaches it to its own entity itself, inside
+its own `methodInitialize()`, rather than `main.js` branching on which one
+to build. `main.js` lost its `EntityComponentCameraControllerFirstPersonInput`
+import and construction call entirely.
+
+A real bug was caught during implementation (see
+`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s "Pattern C" section for the
+full story): the new touch class initially copied
+`EntityComponentCameraControllerFirstPersonInput`'s "register on both
+`document` and `window`" habit, which silently discarded every real touch
+delta (each event fired twice, and the second firing recomputed a delta of
+zero against the position the first firing had just moved to). Fixed by
+listening on `document` only. Verified via `npm run build`, a
+headless-browser check confirming a non-touch context self-attaches the
+mouse+keyboard class while a `hasTouch`/`isMobile` context self-attaches
+the touch class, a synthetic spaced-out touch-drag test confirming the
+camera actually rotates from touch deltas end-to-end (not just that deltas
+were computed), and the existing 2-tab PeerJS multiplayer test confirming
+`EntityComponentPlayerNetworkSync` still works correctly downstream of this
+component.

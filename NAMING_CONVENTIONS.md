@@ -311,6 +311,67 @@ come from ground bounds at all (encapsulation - and leaves room for other
 player-init-time properties to land in the same component later without
 the camera controller's own self-lookups growing one-by-one).
 
+**Second instance under this rule, and the first to combine two axes:**
+`EntityComponentContextEnvironment`
+(`entity components/context/context_environment.js`) — owns two
+environment-detection facts: `methodGetIsTouchPrimary()` (feature-detected
+touch support, for swapping in touch input controls) and
+`methodGetIsNativeShell()` (detects a future Electron/Tauri shell vs. the
+plain browser). `EntityComponentPeerConnectionUI` was migrated to
+self-look this component up for `methodGetIsNativeShell()` instead of
+running its own inline check, which is what gives this component a real
+consumer for that facet on day one, rather than shipping speculatively.
+
+**Why one component for two axes, not two:** touch-vs-pointer and
+native-shell-vs-browser are conceptually unrelated questions, and splitting
+them into `EntityComponentContextInputCapabilities` +
+`EntityComponentContextNativeShell` (or similar) was considered. Decided
+against for now — neither axis has enough consumer-specific complexity
+today to justify two components instead of one general
+"what environment am I running in" component, and splitting preemptively
+would itself be exactly the kind of premature abstraction this rule exists
+to avoid. **Revisit this if it stops being true** — e.g. if either axis
+grows enough of its own consumers, logic, or unrelated-feeling getters that
+the combined component starts to feel like a grab-bag rather than one
+coherent "environment" concept.
+
+## Naming a third lookup pattern: "self-attaching sibling" (Pattern C)
+
+Status: **decided.** Named during the mobile touch-controls brainstorm,
+alongside self-lookup (Pattern A) and main.js-resolves-and-passes (Pattern
+B) — both already named and documented in
+`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s "Self-lookup vs.
+main.js-resolves-and-passes" section. This entry records *why it needed its
+own name* rather than being folded into "self-lookup" as a minor variant;
+the fuller mechanical reasoning, the motivating case, and the trade-offs
+live in that same doc's new "Pattern C: self-attaching sibling components"
+section — this doc stays scoped to the naming question specifically.
+
+**Why not just call it self-lookup too:** self-lookup (Pattern A) is about
+*finding* something — a component reaches out via
+`this.methodGetEntityByName(...)`/`this.methodGetComponent(...)` to locate
+a component that already exists somewhere else in the ECS, typically an
+`EntityComponentContext*` component `main.js` built ahead of time.
+"Self-attaching sibling" is about *creating* something — a component
+constructs a brand-new sibling component itself and attaches it to its own
+entity via `this.methodGetParent().methodAddComponentWithName(...)`, and
+that sibling would not exist at all if the component hadn't just built it.
+Conflating the two under one name would hide a real difference: self-lookup
+finds shared state that's meant to be found by potentially many consumers;
+self-attaching sibling picks a concrete implementation for a dependency the
+component already owns exclusively (nothing else ever looks up
+`EntityComponentCameraControllerFirstPersonInput` except its one sibling
+`EntityComponentCameraControllerFirstPerson`).
+
+**Naming choice:** "sibling" (not "child") — this codebase's ECS has no
+parent/child relationship between components, only same-entity siblings
+attached to a shared parent `Entity` (see `CLAUDE.md`'s ECS section); "self-attaching"
+(not "self-constructing" or "self-injecting") to emphasize the concrete,
+already-existing `methodAddComponentWithName()` call being made, not a new
+mechanism. "Pattern C" simply continues the A/B lettering already
+established for the other two lookup patterns, so all three can be
+referred to consistently as a set.
+
 ## Marking existing code sections: `// #region <label>`
 
 Status: **decided and applied project-wide.** A different kind of
