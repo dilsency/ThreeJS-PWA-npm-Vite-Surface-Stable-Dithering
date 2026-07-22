@@ -14,7 +14,6 @@ import {EntityComponent} from "./classes/ECS/entity_component.js";
 // entity components
 import {EntityComponentCameraControllerFirstPerson} from "./entity components/camera_controller_first_person.js";
 import {EntityComponentPlayerController} from "./entity components/player_controller.js";
-import {EntityComponentPlayerControllerInput} from "./entity components/player_controller.js";
 import {EntityComponentTestCube} from "./entity components/test_objects.js";
 import {EntityComponentTestCubeHUD} from "./entity components/test_objects.js";
 import {EntityComponentBackgroundPlane} from "./entity components/test_objects.js";
@@ -251,9 +250,10 @@ function init()
         // methodInitialize() (see BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md's
         // "Pattern C: self-attaching sibling components" section).
         entityA.methodAddComponentWithName("EntityComponentCameraControllerFirstPerson", new EntityComponentCameraControllerFirstPerson());
-        //
+        // No EntityComponentPlayerControllerInput/...InputTouch construction
+        // here either - same self-attaching Pattern C as
+        // EntityComponentCameraControllerFirstPerson above.
         entityA.methodAddComponentWithName("EntityComponentPlayerController", new EntityComponentPlayerController({cameraPivot: cameraPivot,}));
-        entityA.methodAddComponentWithName("EntityComponentPlayerControllerInput", new EntityComponentPlayerControllerInput());
         //
         // LAN multiplayer (see MULTIPLAYER_TOPOLOGY_AND_SYNC.md): broadcasts this
         // player's own position/facing-direction to every connected peer.

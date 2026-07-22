@@ -667,3 +667,54 @@ camera actually rotates from touch deltas end-to-end (not just that deltas
 were computed), and the existing 2-tab PeerJS multiplayer test confirming
 `EntityComponentPlayerNetworkSync` still works correctly downstream of this
 component.
+
+## 13. Basic mobile/Android touch controls (walk forward) — done
+
+Double-tap-and-hold to walk forward, per direct spec: the second tap of a
+double-tap starts walking (as if W were held down); it continues for as
+long as that same finger stays on the screen, regardless of whether it
+moves; the finger lifting stops it. The whole screen is eligible, and the
+same touch can keep dragging to aim the camera the entire time - walking
+and camera-look both read from the same physical touch stream
+independently and don't interfere with each other.
+
+New `EntityComponentPlayerControllerInputTouch`
+(`entity components/player_controller.js`), tracking whichever touch is a
+candidate "first tap" (by touch identifier, position, and timing) and,
+once a second touchstart lands within `DOUBLE_TAP_MAX_INTERVAL_MS`/
+`DOUBLE_TAP_MAX_DISTANCE_PX` of a completed first tap, setting
+`keys.forward = true` and remembering that touch's identifier as the one
+driving movement - `keys.forward` only goes back to `false` when *that
+specific* touch's `touchend`/`touchcancel` fires, not when it merely
+moves. `backward`/`left`/`right`/`up`/`down` have no touch equivalent yet
+and stay permanently `false`. Second real application of "Pattern C:
+self-attaching sibling components" (see
+`BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`) - `EntityComponentPlayerController`
+decides and attaches its own Input sibling the same way
+`EntityComponentCameraControllerFirstPerson` does, and `main.js` lost its
+`EntityComponentPlayerControllerInput` import and construction call
+entirely.
+
+Verified via `npm run build` and a spaced-out synthetic touch sequence
+(single tap alone confirmed *not* to start walking; a second tap close in
+time/position confirmed to start it; simulated dragging while held
+confirmed the player's position keeps advancing - correctly following the
+camera's current facing as it's dragged, proving walking and aiming
+genuinely coexist - not just that a flag got set; release confirmed to
+stop it), plus the existing desktop-WASD and 2-tab PeerJS multiplayer
+smoke tests confirming no regression.
+
+**Noted but deliberately not acted on:** mobile browsers have a native
+double-tap-to-zoom gesture that could in principle fire alongside this
+double-tap-to-walk one. No `preventDefault()`/`touch-action` CSS was added
+to suppress it, for two reasons: the gesture's second tap is held rather
+than quickly released, which may already fall outside what browsers
+recognize as a double-tap-zoom candidate in the first place; and a
+naively-added `preventDefault()` on every `touchend` would risk suppressing
+click synthesis for real UI elements (the `EntityComponentPeerConnectionUI`
+Connect button, the `EntityComponentButtonPointerLock` button) rather than
+just this gesture. Confirmed clean in the automated tests above; if real
+Android testing turns up actual zoom interference, the correct fix is
+`touch-action: manipulation` CSS on `index.html`'s `body` (which disables
+double-tap-zoom specifically, without touching click synthesis) rather
+than selective `preventDefault()` calls.

@@ -80,6 +80,24 @@ even that should be converted into a proper `EntityComponent` if it's ever
 kept permanently, rather than allowed to grow as a plain-DOM/shared-local-variable
 exception to the pattern.
 
+**This preference extends past entity/component structure to the ECS's own
+lifecycle mechanisms specifically — prefer `methodInitialize()`/
+`methodUpdate(timeElapsed, timeDelta)` over an independent, adjacent
+mechanism whenever the ECS's own facilities can actually do the job**, even
+when the independent mechanism is a standard, unremarkable browser API
+rather than obviously-wrong code. The concrete case: `EntityComponentPlayerControllerInputTouch`'s
+double-tap gesture detection originally measured elapsed time via
+`performance.now()`, called directly inside `touchstart`/`touchend`
+handlers — even though every component's `methodUpdate(timeElapsed,
+timeDelta)` already receives a per-frame clock reading derived from the
+exact same underlying browser clock. Reaching for `performance.now()`
+wasn't solving a problem the ECS clock couldn't; it was a second "how much
+time has passed" mechanism sitting alongside one the codebase already had
+everywhere else. Migrated to `methodUpdate()`-driven accumulators instead —
+see `INPUT_METHODS.md`'s "Timing source for gesture detection" section for
+the full before/after and the one honest tradeoff accepted (up to ~1
+frame's worth of imprecision, negligible against the thresholds involved).
+
 **Any hard-wiring in `main.js` is an exception to this pattern, full stop —
 not a legitimate resting state, even when it's a reasoned, permanent design
 choice rather than throwaway dev-tool code.** It's tempting to grade a piece

@@ -411,7 +411,7 @@ unwanted coupling, not just a convenience choice.
 
 ## Pattern C: self-attaching sibling components
 
-Status: **done.** Implemented for choosing between
+Status: **done, two instances.** First: choosing between
 `EntityComponentCameraControllerFirstPersonInput` (mouse+keyboard) and
 `EntityComponentCameraControllerFirstPersonInputTouch` (touch), both in
 `entity components/camera_controller_first_person.js`. Verified via
@@ -421,7 +421,11 @@ context self-attaches the touch class, a synthetic touch-drag test
 confirming the camera actually rotates from touch input end-to-end, and
 the existing 2-tab PeerJS multiplayer test confirming
 `EntityComponentPlayerNetworkSync` (downstream of this component) still
-works correctly.
+works correctly. Second: the same choice between
+`EntityComponentPlayerControllerInput` and
+`EntityComponentPlayerControllerInputTouch` (`entity components/player_controller.js`,
+`TODO.md` item 13) — confirms Pattern C generalizes cleanly to a second
+controller pair without any new mechanism.
 
 **How this differs from self-lookup (Pattern A).** Self-lookup *finds*
 something that already exists elsewhere in the ECS — typically a
