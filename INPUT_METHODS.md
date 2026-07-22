@@ -82,6 +82,44 @@ to hand-computed, cross-event state. Both touch Input classes register on
 `document` only for this reason. Full story in
 `BARE_MINIMUM_THREEJS_EXCEPTION_OR_NOT.md`'s "Pattern C" section.
 
+## Native browser gesture recognizers compete with custom gesture detection
+
+A second real bug, caught only by testing on an actual Android device -
+automated tests dispatching synthetic `TouchEvent`s cannot reproduce this
+class of bug at all, since they only ever exercise this codebase's own JS
+logic, never the browser's native touch-gesture-recognition layer that
+sits in front of it for *real* touch input.
+
+`EntityComponentPlayerControllerInputTouch`'s double-tap-and-hold gesture
+worked for starting/stopping walking, but the same finger couldn't
+simultaneously drag to aim the camera - the drag itself wasn't reaching
+`EntityComponentCameraControllerFirstPersonInputTouch` correctly. Cause:
+mobile browsers recognize the exact same "two taps close together"
+pattern as a candidate for their own native gestures (double-tap-to-zoom,
+and on some Android builds, double-tap-and-drag-to-zoom) - independent of
+whether the second tap is quickly released or held down afterward. Once
+the browser's own recognizer engages, it can intercept the drag for its
+own gesture instead of delivering plain `touchmove` events to this
+codebase's listeners.
+
+**Fixed with CSS, not component code:** `touch-action: none;` on
+`index.html`'s `html,body` rule tells the browser to stop attempting to
+recognize any native touch gesture (scrolling, pinch-zoom,
+double-tap-zoom) at all, leaving 100% of touch interpretation to this
+codebase's own listeners. Chosen over the narrower `touch-action:
+manipulation` (which still permits panning/pinch-zoom to reach the
+browser) since this project is a full-screen WebGL canvas with no
+scrollable content worth preserving default handling for. See `TODO.md`
+item 13 for the fuller incident history - the original risk was
+predicted and explicitly logged as *not yet confirmed* before real-device
+testing surfaced it.
+
+**The general lesson:** whenever a custom gesture is built from the same
+raw shape a well-known native gesture also watches for (two quick taps,
+a two-finger spread, an edge swipe), assume the browser's own recognizer
+is watching too, and verify on a real touchscreen - not just via
+synthetic event dispatch - before considering the gesture done.
+
 ## Timing source for gesture detection: `performance.now()` vs. the ECS clock
 
 Status: **done.** `EntityComponentPlayerControllerInputTouch` (`entity

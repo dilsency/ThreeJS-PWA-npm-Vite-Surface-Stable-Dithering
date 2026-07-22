@@ -704,17 +704,26 @@ genuinely coexist - not just that a flag got set; release confirmed to
 stop it), plus the existing desktop-WASD and 2-tab PeerJS multiplayer
 smoke tests confirming no regression.
 
-**Noted but deliberately not acted on:** mobile browsers have a native
-double-tap-to-zoom gesture that could in principle fire alongside this
-double-tap-to-walk one. No `preventDefault()`/`touch-action` CSS was added
-to suppress it, for two reasons: the gesture's second tap is held rather
-than quickly released, which may already fall outside what browsers
-recognize as a double-tap-zoom candidate in the first place; and a
-naively-added `preventDefault()` on every `touchend` would risk suppressing
-click synthesis for real UI elements (the `EntityComponentPeerConnectionUI`
-Connect button, the `EntityComponentButtonPointerLock` button) rather than
-just this gesture. Confirmed clean in the automated tests above; if real
-Android testing turns up actual zoom interference, the correct fix is
-`touch-action: manipulation` CSS on `index.html`'s `body` (which disables
-double-tap-zoom specifically, without touching click synthesis) rather
-than selective `preventDefault()` calls.
+**Update - the noted risk materialized, now fixed.** This item originally
+predicted mobile browsers' native double-tap-to-zoom gesture could conflict
+with this double-tap-to-walk one, and deliberately didn't act on it pending
+real Android confirmation (since automated tests dispatching synthetic
+`TouchEvent`s can't exercise a browser's native gesture-recognition layer
+at all - only real touch input goes through it). Real testing confirmed
+it: double-tap-and-hold walking worked, but the same finger could no
+longer simultaneously drag to aim the camera - the native gesture
+recognizer (double-tap-to-zoom, or on some Android builds,
+double-tap-and-drag-to-zoom) was intercepting the drag once the
+double-tap pattern was recognized, independent of whether the second tap
+was quickly released or held. Fixed with `touch-action: none;` added to
+`index.html`'s `html,body` CSS rule - not the narrower `manipulation`
+value originally proposed, since this project is a full-screen WebGL
+canvas with no scrollable content to preserve; `none` removes every native
+touch gesture (scroll, pinch-zoom, double-tap-zoom) so 100% of touch
+interpretation stays with this codebase's own listeners. Verified via
+`npm run build` (confirmed the rule reaches `dist/index.html`) and the
+full existing touch/desktop/multiplayer smoke-test suite (unaffected -
+`touch-action` only changes what the *browser* does with touch input, not
+how JS event listeners receive it) - the actual fix for the reported
+symptom can only be confirmed by the user's own Android device, the same
+way the original bug was only found there.
