@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {EntityComponent} from "../classes/ECS/entity_component.js";
+import {debugOverlaySetLine} from "./temp_debug_overlay.js"; // TEMPORARY - see that file's header comment
 
 export class EntityComponentCameraControllerFirstPersonInput extends EntityComponent
 {
@@ -169,6 +170,7 @@ export class EntityComponentCameraControllerFirstPersonInputTouch extends Entity
     methodEventOnTouchStart(e)
     {
         const touch = e.touches[0];
+        debugOverlaySetLine("cam", `touchstart touches=${e.touches.length} id=${touch?.identifier} pos=${touch?.clientX},${touch?.clientY}`); // TEMPORARY
         if(touch == null){return;}
         this.#lastTouchX = touch.clientX;
         this.#lastTouchY = touch.clientY;
@@ -177,8 +179,8 @@ export class EntityComponentCameraControllerFirstPersonInputTouch extends Entity
     methodEventOnTouchMove(e)
     {
         const touch = e.touches[0];
-        if(touch == null){return;}
-        if(this.#lastTouchX == null || this.#lastTouchY == null){return;} // no prior touchstart to diff against
+        if(touch == null){debugOverlaySetLine("cam", "move: no touch[0]"); return;} // TEMPORARY
+        if(this.#lastTouchX == null || this.#lastTouchY == null){debugOverlaySetLine("cam", `move: no lastTouch (id=${touch.identifier})`); return;} // TEMPORARY // no prior touchstart to diff against
 
         e.preventDefault();
 
@@ -192,6 +194,8 @@ export class EntityComponentCameraControllerFirstPersonInputTouch extends Entity
 
         this.#lastTouchX = touch.clientX;
         this.#lastTouchY = touch.clientY;
+
+        debugOverlaySetLine("cam", `touches=${e.touches.length} id=${touch.identifier} dx=${this.#mouseX} dy=${this.#mouseY}`); // TEMPORARY
     }
 
     methodEventOnTouchEnd(e)
@@ -200,6 +204,7 @@ export class EntityComponentCameraControllerFirstPersonInputTouch extends Entity
         // stale position left over from this now-ended touch.
         this.#lastTouchX = null;
         this.#lastTouchY = null;
+        debugOverlaySetLine("cam", `touchend touches=${e.touches.length} (cleared)`); // TEMPORARY
     }
 
     methodResetMouse()

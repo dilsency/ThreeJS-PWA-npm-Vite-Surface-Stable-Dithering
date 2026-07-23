@@ -727,3 +727,15 @@ full existing touch/desktop/multiplayer smoke-test suite (unaffected -
 how JS event listeners receive it) - the actual fix for the reported
 symptom can only be confirmed by the user's own Android device, the same
 way the original bug was only found there.
+
+**Update - `touch-action: none` alone did not fix it; still open.** Real
+retesting confirmed the camera still can't be turned while walking is
+active, even after the `touch-action` fix above. A temporary, on-screen
+debug overlay (`entity components/temp_debug_overlay.js`, wired into both
+`EntityComponentCameraControllerFirstPersonInputTouch` and
+`EntityComponentPlayerControllerInputTouch`) was added to surface live
+touch-tracking state directly on the reporter's phone screen, since there
+is no other way to inspect this without a devtools connection to that
+device. **Delete this file and every `debugOverlaySetLine()` call site**
+once the real cause is found and fixed - it's explicitly temporary, marked
+as such in its own header comment and at every call site.

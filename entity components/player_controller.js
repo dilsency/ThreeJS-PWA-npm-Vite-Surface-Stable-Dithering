@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {EntityComponent} from "../classes/ECS/entity_component.js";
+import {debugOverlaySetLine} from "./temp_debug_overlay.js"; // TEMPORARY - see that file's header comment
 
 // Double-tap timing/distance thresholds, and the max time+movement a touch
 // can have and still count as a single "tap" rather than a drag/long-press -
@@ -199,6 +200,7 @@ export class EntityComponentPlayerControllerInputTouch extends EntityComponent
                 this.#walkingTouchIdentifier = touch.identifier;
                 this.#keys.forward = true;
                 this.#pendingTapElapsedSeconds = null;
+                debugOverlaySetLine("player", `WALKING START id=${touch.identifier}`); // TEMPORARY
                 return;
             }
         }
@@ -207,6 +209,7 @@ export class EntityComponentPlayerControllerInputTouch extends EntityComponent
         this.#candidateStartX = touch.clientX;
         this.#candidateStartY = touch.clientY;
         this.#candidateElapsedSeconds = 0;
+        debugOverlaySetLine("player", `tap candidate id=${touch.identifier} walking=${this.#walkingTouchIdentifier}`); // TEMPORARY
     }
 
     methodEventOnTouchEnd(e)
@@ -227,10 +230,11 @@ export class EntityComponentPlayerControllerInputTouch extends EntityComponent
         {
             this.#walkingTouchIdentifier = null;
             this.#keys.forward = false;
+            debugOverlaySetLine("player", `WALKING STOP id=${touch.identifier}`); // TEMPORARY
             return; // a touch that just drove walking isn't itself a tap candidate
         }
 
-        if(this.#candidateTouchIdentifier !== touch.identifier){return;}
+        if(this.#candidateTouchIdentifier !== touch.identifier){debugOverlaySetLine("player", `touchend id=${touch.identifier} (not tracked)`); return;} // TEMPORARY
         const candidateElapsedSeconds = this.#candidateElapsedSeconds;
         this.#candidateTouchIdentifier = null;
 
@@ -238,11 +242,12 @@ export class EntityComponentPlayerControllerInputTouch extends EntityComponent
         // for a future double-tap - if it was quick and didn't move much;
         // otherwise it was a drag/long-press, not a tap.
         const distanceFromStart = Math.hypot(touch.clientX - this.#candidateStartX, touch.clientY - this.#candidateStartY);
-        if(candidateElapsedSeconds > TAP_MAX_DURATION_SECONDS || distanceFromStart > TAP_MAX_MOVEMENT_PX){return;}
+        if(candidateElapsedSeconds > TAP_MAX_DURATION_SECONDS || distanceFromStart > TAP_MAX_MOVEMENT_PX){debugOverlaySetLine("player", `tap rejected (elapsed=${candidateElapsedSeconds.toFixed(2)}s dist=${distanceFromStart.toFixed(0)}px)`); return;} // TEMPORARY
 
         this.#pendingTapElapsedSeconds = 0;
         this.#pendingTapX = touch.clientX;
         this.#pendingTapY = touch.clientY;
+        debugOverlaySetLine("player", `tap completed id=${touch.identifier}, waiting for 2nd`); // TEMPORARY
     }
 }
 
